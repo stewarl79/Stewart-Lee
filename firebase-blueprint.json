@@ -1,0 +1,64 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user information and roles.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email", "description": "User's email" },
+        "displayName": { "type": "string", "description": "User's display name" },
+        "phone": { "type": "string", "description": "User's phone number" },
+        "role": { "type": "string", "enum": ["coach", "client"], "description": "User's role" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account creation time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Coaching session details.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Google Calendar Event ID" },
+        "title": { "type": "string", "description": "Session title" },
+        "description": { "type": "string", "description": "Session description" },
+        "startTime": { "type": "string", "format": "date-time", "description": "Session start time" },
+        "endTime": { "type": "string", "format": "date-time", "description": "Session end time" },
+        "clientEmail": { "type": "string", "format": "email", "description": "Client's email" },
+        "clientUid": { "type": "string", "description": "Client's UID (if registered)" },
+        "isExternal": { "type": "boolean", "description": "True if client is not registered" },
+        "status": { "type": "string", "enum": ["scheduled", "completed", "cancelled"], "description": "Session status" },
+        "remindersSent": { "type": "array", "items": { "type": "string" }, "description": "List of reminder types sent (e.g., '48h', '1h')" }
+      },
+      "required": ["id", "title", "startTime", "endTime", "clientEmail"]
+    },
+    "Document": {
+      "title": "Document",
+      "description": "Shared coaching materials.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "File name" },
+        "url": { "type": "string", "format": "uri", "description": "Firebase Storage URL" },
+        "ownerUid": { "type": "string", "description": "Coach's UID" },
+        "sharedWithEmail": { "type": "string", "format": "email", "description": "Client's email" },
+        "sharedWithUid": { "type": "string", "description": "Client's UID (if registered)" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Upload time" }
+      },
+      "required": ["name", "url", "ownerUid", "sharedWithEmail"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "UserProfile",
+      "description": "User profiles"
+    },
+    "/appointments/{appointmentId}": {
+      "schema": "Appointment",
+      "description": "Coaching sessions"
+    },
+    "/documents/{documentId}": {
+      "schema": "Document",
+      "description": "Shared documents"
+    }
+  }
+}

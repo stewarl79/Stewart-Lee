@@ -1,0 +1,159 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required) - Firebase Auth UID
+    //   - email: string (required, email format) - User's email
+    //   - displayName: string (optional, < 100 chars) - User's display name
+    //   - phone: string (optional, < 20 chars) - User's phone number
+    //   - role: string (required, enum: ['coach', 'client']) - User's role
+    //   - createdAt: timestamp (optional) - Account creation time
+    //
+    // Collection: appointments
+    // Document ID: {appointmentId}
+    // Fields:
+    //   - id: string (required) - Google Calendar Event ID
+    //   - title: string (required, < 200 chars) - Session title
+    //   - description: string (optional, < 2000 chars) - Session description
+    //   - startTime: string (required, ISO 8601) - Session start time
+    //   - endTime: string (required, ISO 8601) - Session end time
+    //   - clientEmail: string (required, email format) - Client's email
+    //   - clientUid: string (optional) - Client's UID
+    //   - isExternal: bool (optional) - True if client is not registered
+    //   - status: string (optional, enum: ['scheduled', 'completed', 'cancelled']) - Session status
+    //   - remindersSent: list (optional, < 10 items) - List of reminder types sent
+    //
+    // Collection: documents
+    // Document ID: {documentId}
+    // Fields:
+    //   - name: string (required, < 255 chars) - File name
+    //   - url: string (required, URL format) - Firebase Storage URL
+    //   - ownerUid: string (required) - Coach's UID
+    //   - sharedWithEmail: string (required, email format) - Client's email
+    //   - sharedWithUid: string (optional) - Client's UID
+    //   - createdAt: string (required, ISO 8601) - Upload time
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isCoach() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coach' ||
+         (request.auth.token.email == "msustewart@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data, uid) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             hasOnlyAllowedFields(['uid', 'email', 'displayName', 'phone', 'role', 'createdAt', 'mustChangePassword']) &&
+             data.uid == uid &&
+             data.email is string && isValidEmail(data.email) &&
+             data.role in ['coach', 'client'] &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() < 20)) &&
+             (!('mustChangePassword' in data) || data.mustChangePassword is bool);
+    }
+
+    function isValidAppointment(data) {
+      return data.keys().hasAll(['id', 'title', 'startTime', 'endTime', 'clientEmail']) &&
+             hasOnlyAllowedFields(['id', 'title', 'description', 'startTime', 'endTime', 'clientEmail', 'clientUid', 'isExternal', 'status', 'remindersSent', 'meetLink']) &&
+             data.id is string && data.id.size() < 100 &&
+             data.title is string && data.title.size() < 200 &&
+             (!('description' in data) || (data.description is string && data.description.size() < 2000)) &&
+             isValidDateString(data.startTime) &&
+             isValidDateString(data.endTime) &&
+             isValidEmail(data.clientEmail) &&
+             (!('status' in data) || data.status in ['scheduled', 'completed', 'cancelled']) &&
+             (!('remindersSent' in data) || (data.remindersSent is list && data.remindersSent.size() < 10)) &&
+             (!('meetLink' in data) || (data.meetLink is string && data.meetLink.size() < 500));
+    }
+
+    function isValidDocument(data) {
+      return data.keys().hasAll(['name', 'url', 'ownerUid', 'sharedWithEmail', 'createdAt']) &&
+             hasOnlyAllowedFields(['name', 'url', 'ownerUid', 'sharedWithEmail', 'sharedWithUid', 'createdAt']) &&
+             data.name is string && data.name.size() < 255 &&
+             isValidUrl(data.url) &&
+             data.ownerUid is string &&
+             isValidEmail(data.sharedWithEmail) &&
+             isValidDateString(data.createdAt);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{uid} {
+      // Coaches can read all users (to see clients). Clients can only read themselves.
+      allow read: if isAuthenticated() && (isOwner(uid) || isCoach());
+      
+      // On create:
+      // 1. User must be authenticated and owner of the document.
+      // 2. Role must be 'client' unless they are the default admin.
+      allow create: if isAuthenticated() && isOwner(uid) && isValidUser(request.resource.data, uid) &&
+                    (request.resource.data.role == 'client' || request.auth.token.email == "msustewart@gmail.com");
+      
+      // On update:
+      // 1. Owner can update their own profile but CANNOT change their role.
+      // 2. Coach can update client profiles.
+      allow update: if isAuthenticated() && 
+                    ((isOwner(uid) && isValidUser(request.resource.data, uid) && request.resource.data.role == resource.data.role) || 
+                     isCoach());
+    }
+
+    match /appointments/{appointmentId} {
+      // Coaches can see all appointments. Clients can only see their own.
+      allow read: if isAuthenticated() && (isCoach() || request.auth.token.email == resource.data.clientEmail);
+      
+      // Only coaches can manage appointments.
+      allow create: if isCoach() && isValidAppointment(request.resource.data);
+      allow update: if isCoach() && isValidAppointment(request.resource.data);
+      allow delete: if isCoach();
+    }
+
+    match /documents/{documentId} {
+      // Coaches can see all shared documents. Clients can only see documents shared with them.
+      allow read: if isAuthenticated() && (isCoach() || request.auth.token.email == resource.data.sharedWithEmail);
+      
+      // Only coaches can manage documents.
+      allow create: if isCoach() && isValidDocument(request.resource.data);
+      allow update: if isCoach() && isValidDocument(request.resource.data);
+      allow delete: if isCoach();
+    }
+  }
+}
