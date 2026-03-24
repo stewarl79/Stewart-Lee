@@ -1,6 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import { google } from "googleapis";
 import admin from "firebase-admin";
@@ -17,7 +18,7 @@ const __dirname = path.dirname(__filename);
 
 // Initialize Firebase Admin
 // Note: In AI Studio, we use the environment variables for Firebase
-import firebaseConfig from "./firebase-applet-config.json" assert { type: "json" };
+const firebaseConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8"));
 
 if (!admin.apps.length) {
   try {
@@ -51,7 +52,7 @@ const auth = getAuth();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json());
 
