@@ -8,9 +8,11 @@
         "uid": { "type": "string", "description": "Firebase Auth UID" },
         "email": { "type": "string", "format": "email", "description": "User's email" },
         "displayName": { "type": "string", "description": "User's display name" },
+        "photoURL": { "type": "string", "format": "uri", "description": "User's avatar URL" },
         "phone": { "type": "string", "description": "User's phone number" },
         "role": { "type": "string", "enum": ["coach", "client"], "description": "User's role" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Account creation time" }
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account creation time" },
+        "reminderTemplate": { "type": "string", "description": "Custom reminder email template" }
       },
       "required": ["uid", "email", "role"]
     },

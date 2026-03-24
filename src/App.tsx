@@ -99,10 +99,12 @@ interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
+  photoURL?: string;
   phone?: string;
   role: Role;
   createdAt: any;
   mustChangePassword?: boolean;
+  reminderTemplate?: string;
 }
 
 interface Appointment {
@@ -212,12 +214,12 @@ export default function App() {
   const [documents, setDocuments] = useState<SharedDocument[]>([]);
 
   useEffect(() => {
+    let unsubProfile: (() => void) | null = null;
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
-        try {
-          const docRef = doc(db, 'users', u.uid);
-          const docSnap = await getDoc(docRef);
+        const docRef = doc(db, 'users', u.uid);
+        unsubProfile = onSnapshot(docRef, async (docSnap) => {
           if (docSnap.exists()) {
             const profileData = docSnap.data() as UserProfile;
             setProfile(profileData);
@@ -236,15 +238,21 @@ export default function App() {
             await setDoc(docRef, newProfile);
             setProfile(newProfile);
           }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, 'users');
-        }
+          setLoading(false);
+        }, (err) => {
+          handleFirestoreError(err, OperationType.GET, 'users');
+          setLoading(false);
+        });
       } else {
         setProfile(null);
+        if (unsubProfile) unsubProfile();
+        setLoading(false);
       }
-      setLoading(false);
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (unsubProfile) unsubProfile();
+    };
   }, []);
 
   // Real-time listeners
@@ -489,7 +497,7 @@ export default function App() {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'dashboard': return <DashboardView appointments={appointments} clients={clients} documents={documents} role={profile?.role} setActiveTab={setActiveTab} />;
+      case 'dashboard': return <DashboardView appointments={appointments} clients={clients} documents={documents} profile={profile} setActiveTab={setActiveTab} />;
       case 'calendar': return <CalendarView appointments={appointments} role={profile?.role} />;
       case 'clients': return <ClientsView clients={clients} appointments={appointments} documents={documents} role={profile?.role} />;
       case 'documents': return <DocumentsView documents={documents} role={profile?.role} user={user} />;
@@ -533,8 +541,12 @@ export default function App() {
 
         <div className="mt-auto pt-6 border-t border-slate-800">
           <div className="flex items-center gap-3 px-2 mb-6">
-            <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-emerald-500 font-bold">
-              {user.displayName?.[0] || user.email?.[0].toUpperCase()}
+            <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-emerald-500 font-bold overflow-hidden">
+              {profile?.photoURL ? (
+                <img src={profile.photoURL} alt="Avatar" className="w-full h-full object-cover" />
+              ) : (
+                user.displayName?.[0] || user.email?.[0].toUpperCase()
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-white truncate">{user.displayName || 'User'}</p>
@@ -700,7 +712,7 @@ export default function App() {
 
 // --- View Components ---
 
-function DashboardView({ appointments, clients, documents, role, setActiveTab }: any) {
+function DashboardView({ appointments, clients, documents, profile, setActiveTab }: any) {
   const nextAppointment = useMemo(() => {
     return appointments.find(a => isAfter(a.startTime.toDate(), new Date()) && a.status === 'scheduled');
   }, [appointments]);
@@ -714,7 +726,7 @@ function DashboardView({ appointments, clients, documents, role, setActiveTab }:
   return (
     <div className="space-y-8">
       <header>
-        <h2 className="text-2xl font-bold text-white">Welcome back, {role === 'coach' ? 'Lee' : 'Client'}</h2>
+        <h2 className="text-2xl font-bold text-white">Welcome back, {profile?.displayName?.split(' ')[0] || 'User'}</h2>
         <p className="text-slate-400 mt-1">Here's what's happening with your coaching portal today.</p>
       </header>
 
@@ -795,19 +807,19 @@ function DashboardView({ appointments, clients, documents, role, setActiveTab }:
 
         {/* Recent Activity / Quick Actions */}
         <Card 
-          title={role === 'coach' ? "Client Overview" : "Recent Documents"} 
-          subtitle={role === 'coach' ? "Manage your registered clients" : "Latest shared materials"}
+          title={profile?.role === 'coach' ? "Client Overview" : "Recent Documents"} 
+          subtitle={profile?.role === 'coach' ? "Manage your registered clients" : "Latest shared materials"}
           action={
             <button 
-              onClick={() => setActiveTab(role === 'coach' ? 'clients' : 'documents')}
+              onClick={() => setActiveTab(profile?.role === 'coach' ? 'clients' : 'documents')}
               className="text-emerald-500 text-sm font-medium hover:underline flex items-center gap-1"
             >
-              {role === 'coach' ? 'Manage Clients' : 'View All'} <ChevronRight className="w-4 h-4" />
+              {profile?.role === 'coach' ? 'Manage Clients' : 'View All'} <ChevronRight className="w-4 h-4" />
             </button>
           }
         >
           <div className="space-y-4">
-            {role === 'coach' ? (
+            {profile?.role === 'coach' ? (
               clients.slice(0, 4).map((client: any) => (
                 <div key={client.uid} className="flex items-center justify-between p-3 bg-slate-800/30 rounded-xl border border-slate-700/30">
                   <div className="flex items-center gap-3">
@@ -838,7 +850,7 @@ function DashboardView({ appointments, clients, documents, role, setActiveTab }:
                 </div>
               ))
             )}
-            {((role === 'coach' && clients.length === 0) || (role === 'client' && documents.length === 0)) && (
+            {((profile?.role === 'coach' && clients.length === 0) || (profile?.role === 'client' && documents.length === 0)) && (
               <p className="text-center py-8 text-slate-600 text-sm italic">Nothing to show yet.</p>
             )}
           </div>
@@ -1648,7 +1660,54 @@ function RemindersView({ appointments, role }: any) {
 }
 
 function SettingsView({ profile, role }: any) {
-  const [emailTemplate, setEmailTemplate] = useState('Hi, your session "{title}" is in {time}.');
+  const [emailTemplate, setEmailTemplate] = useState(profile?.reminderTemplate || 'Hi, your session "{title}" is in {time}.');
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleUpdateTemplate = async () => {
+    if (!auth.currentUser) return;
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        reminderTemplate: emailTemplate
+      });
+      alert('Reminder template updated!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'users');
+      alert('Failed to update template.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !auth.currentUser) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert('File size must be less than 2MB');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const storageRef = ref(storage, `avatars/${auth.currentUser.uid}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        photoURL: url
+      });
+      await updateProfile(auth.currentUser, { photoURL: url });
+      alert('Avatar updated successfully!');
+    } catch (error) {
+      console.error('Avatar upload error:', error);
+      alert('Failed to upload avatar.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -1662,12 +1721,27 @@ function SettingsView({ profile, role }: any) {
           <Card title="Profile Information" subtitle="Update your public profile details">
             <div className="space-y-6">
               <div className="flex items-center gap-6">
-                <div className="w-20 h-20 rounded-3xl bg-emerald-500/10 flex items-center justify-center text-emerald-500 text-3xl font-bold">
-                  {profile?.displayName[0]}
+                <div className="w-20 h-20 rounded-3xl bg-emerald-500/10 flex items-center justify-center text-emerald-500 text-3xl font-bold overflow-hidden">
+                  {profile?.photoURL ? (
+                    <img src={profile.photoURL} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    profile?.displayName[0]
+                  )}
                 </div>
                 <div>
-                  <button className="bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-700 transition-colors">
-                    Change Avatar
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    onChange={handleAvatarChange} 
+                    className="hidden" 
+                    accept="image/*"
+                  />
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-700 transition-colors disabled:opacity-50"
+                  >
+                    {uploading ? 'Uploading...' : 'Change Avatar'}
                   </button>
                   <p className="text-xs text-slate-500 mt-2">JPG, PNG or GIF. Max size 2MB.</p>
                 </div>
@@ -1675,12 +1749,14 @@ function SettingsView({ profile, role }: any) {
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-400 mb-2">Display Name</label>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Full Name</label>
                   <input 
                     type="text" 
-                    defaultValue={profile?.displayName}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    disabled
+                    value={profile?.displayName || ''}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 text-slate-500 cursor-not-allowed"
                   />
+                  <p className="text-[10px] text-slate-600 mt-2 italic">Contact your coach to change your registered name.</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">Email Address</label>
@@ -1692,9 +1768,7 @@ function SettingsView({ profile, role }: any) {
                   />
                 </div>
               </div>
-              <button className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-emerald-500 transition-colors">
-                Save Changes
-              </button>
+              {/* Profile save button removed as fields are now read-only */}
             </div>
           </Card>
 
@@ -1711,8 +1785,12 @@ function SettingsView({ profile, role }: any) {
                   />
                   <p className="text-xs text-slate-500 mt-2">Available variables: {'{title}'}, {'{time}'}, {'{date}'}</p>
                 </div>
-                <button className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-emerald-500 transition-colors">
-                  Update Templates
+                <button 
+                  onClick={handleUpdateTemplate}
+                  disabled={saving}
+                  className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                >
+                  {saving ? 'Updating...' : 'Update Templates'}
                 </button>
               </div>
             </Card>
