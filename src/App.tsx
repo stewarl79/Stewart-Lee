@@ -22,6 +22,7 @@ import {
   X,
   UserPlus
 } from 'lucide-react';
+import logo from './assets/logo.png';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   signInWithPopup, 
@@ -384,7 +385,7 @@ export default function App() {
           <div className="flex flex-col items-center text-center">
             <div className="w-16 h-16 mb-6">
               <img 
-                src="/logo.png" 
+                src={logo} 
                 alt="MrLeeTeaches Logo" 
                 className="w-full h-full object-contain rounded-2xl"
                 onError={(e) => {
@@ -522,7 +523,7 @@ export default function App() {
         <div className="flex items-center gap-3 mb-10 px-2">
           <div className="w-10 h-10">
             <img 
-              src="/logo.png" 
+              src={logo} 
               alt="Logo" 
               className="w-full h-full object-contain rounded-xl"
               onError={(e) => {
@@ -575,7 +576,7 @@ export default function App() {
       <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 z-50">
         <div className="flex items-center gap-2">
           <img 
-            src="/logo.png" 
+            src={logo} 
             alt="Logo" 
             className="w-8 h-8 object-contain rounded-lg"
             onError={(e) => {
@@ -613,7 +614,7 @@ export default function App() {
               <div className="flex items-center justify-between mb-10">
                 <div className="flex items-center gap-3">
                   <img 
-                    src="/logo.png" 
+                    src={logo} 
                     alt="Logo" 
                     className="w-10 h-10 object-contain rounded-xl"
                     onError={(e) => {
