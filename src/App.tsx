@@ -489,6 +489,14 @@ export default function App() {
             <p className="mt-8 text-[10px] text-slate-600 uppercase tracking-widest">
               MrLeeTeaches Coaching Portal
             </p>
+            <a 
+              href="https://mrleeteaches.com/privacypolicy/" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="mt-4 text-[10px] text-slate-500 hover:text-emerald-500 transition-colors"
+            >
+              Privacy Policy
+            </a>
           </div>
         </motion.div>
       </div>
