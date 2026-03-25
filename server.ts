@@ -189,13 +189,23 @@ TO FIX THIS:
   app.post("/api/admin/create-client", async (req, res) => {
     const { email, displayName, phone } = req.body;
     
-    // Check if the requester is the coach
-    // In a real app, we'd verify the ID token from the Authorization header
-    // For this demo, we'll assume the frontend only calls this when authorized
-    // but we should still check the email if possible.
-    
     if (!email || !displayName) {
       return res.status(400).json({ error: "Email and display name are required." });
+    }
+
+    // Format phone to E.164 if provided
+    let formattedPhone = undefined;
+    if (phone) {
+      const digits = phone.replace(/\D/g, "");
+      if (digits.length === 10) {
+        formattedPhone = `+1${digits}`;
+      } else if (digits.length > 10 && phone.startsWith("+")) {
+        formattedPhone = phone; // Assume already formatted
+      } else if (digits.length > 10) {
+        formattedPhone = `+${digits}`;
+      } else {
+        return res.status(400).json({ error: "Invalid phone number format. Please provide a 10-digit number or include country code (e.g., +1...)." });
+      }
     }
 
     try {
@@ -207,7 +217,7 @@ TO FIX THIS:
         email,
         displayName,
         password: tempPassword,
-        phoneNumber: phone || undefined
+        phoneNumber: formattedPhone
       });
 
       // Create user profile in Firestore
@@ -215,7 +225,7 @@ TO FIX THIS:
         uid: userRecord.uid,
         email: email.toLowerCase(),
         displayName,
-        phone: phone || null,
+        phone: formattedPhone || null,
         role: "client",
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         mustChangePassword: true
@@ -258,6 +268,122 @@ TO FIX THIS:
         `;
       }
       res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  // --- Client: Request Appointment ---
+  app.post("/api/appointments/request", async (req, res) => {
+    const { uid, email, displayName, reason, desiredDateTime } = req.body;
+    const coachEmail = process.env.SMTP_USER || process.env.COACH_EMAIL || "msustewart@gmail.com";
+
+    if (!uid || !email || !reason || !desiredDateTime) {
+      return res.status(400).json({ error: "Missing required fields." });
+    }
+
+    try {
+      // Save to Firestore
+      await db.collection("requests").add({
+        uid,
+        email,
+        displayName: displayName || "A client",
+        reason,
+        desiredDateTime,
+        status: "pending",
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      // Notify Coach
+      const emailBody = `
+        New Session Request from ${displayName || email}:
+        
+        Reason: ${reason}
+        Desired Time: ${desiredDateTime}
+        
+        Please log in to the portal to approve or reject this request.
+      `;
+      await sendEmail(coachEmail, `New Session Request: ${displayName || email}`, emailBody);
+
+      res.json({ message: "Request submitted successfully" });
+    } catch (error: any) {
+      console.error("Failed to submit request:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Client: Cancel Appointment ---
+  app.post("/api/appointments/cancel", async (req, res) => {
+    const { appointmentId, reason, clientName } = req.body;
+    const coachEmail = process.env.SMTP_USER || process.env.COACH_EMAIL || "msustewart@gmail.com";
+
+    if (!appointmentId) {
+      return res.status(400).json({ error: "Appointment ID is required." });
+    }
+
+    try {
+      const apptRef = db.collection("appointments").doc(appointmentId);
+      const apptDoc = await apptRef.get();
+
+      if (!apptDoc.exists) {
+        return res.status(404).json({ error: "Appointment not found." });
+      }
+
+      const appt = apptDoc.data()!;
+      
+      // Update status in Firestore
+      await apptRef.update({ status: "cancelled" });
+
+      // Notify Coach
+      const emailBody = `
+        Appointment Cancelled by ${clientName || appt.clientEmail}:
+        
+        Session: ${appt.title}
+        Original Time: ${appt.startTime}
+        Reason: ${reason || "No reason provided"}
+        
+        The session has been marked as cancelled in the portal.
+      `;
+      await sendEmail(coachEmail, `Appointment Cancelled: ${appt.title}`, emailBody);
+
+      res.json({ message: "Appointment cancelled successfully" });
+    } catch (error: any) {
+      console.error("Failed to cancel appointment:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Client: Reschedule Appointment ---
+  app.post("/api/appointments/reschedule", async (req, res) => {
+    const { appointmentId, reason, desiredDateTime, clientName } = req.body;
+    const coachEmail = process.env.SMTP_USER || process.env.COACH_EMAIL || "msustewart@gmail.com";
+
+    if (!appointmentId || !desiredDateTime) {
+      return res.status(400).json({ error: "Appointment ID and desired time are required." });
+    }
+
+    try {
+      const apptDoc = await db.collection("appointments").doc(appointmentId).get();
+      if (!apptDoc.exists) {
+        return res.status(404).json({ error: "Appointment not found." });
+      }
+      const appt = apptDoc.data()!;
+
+      // Notify Coach (we don't update the appointment yet, coach must do it manually)
+      const emailBody = `
+        Reschedule Request from ${clientName || appt.clientEmail}:
+        
+        Session: ${appt.title}
+        Original Time: ${appt.startTime}
+        Desired New Time: ${desiredDateTime}
+        Reason: ${reason || "No reason provided"}
+        
+        Please contact the client or update the appointment in the portal if you agree to this change.
+      `;
+      await sendEmail(coachEmail, `Reschedule Request: ${appt.title}`, emailBody);
+
+      res.json({ message: "Reschedule request sent successfully" });
+    } catch (error: any) {
+      console.error("Failed to request reschedule:", error);
+      res.status(500).json({ error: error.message });
     }
   });
 

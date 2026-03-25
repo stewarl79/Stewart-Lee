@@ -39,6 +39,24 @@ service cloud.firestore {
     //   - sharedWithUid: string (optional) - Client's UID
     //   - createdAt: string (required, ISO 8601) - Upload time
     //
+    // Collection: requests
+    // Document ID: {requestId}
+    // Fields:
+    //   - uid: string (required) - Client's UID
+    //   - email: string (required, email format) - Client's email
+    //   - displayName: string (optional) - Client's name
+    //   - reason: string (required, < 2000 chars) - Reason for the session
+    //   - desiredDateTime: string (required, ISO 8601) - Requested date and time
+    //   - status: string (required, enum: ['pending', 'approved', 'rejected']) - Request status
+    //   - createdAt: timestamp (optional) - Request time
+    //
+    // Collection: coach_notes
+    // Document ID: {clientUid}
+    // Fields:
+    //   - clientUid: string (required) - Client's UID
+    //   - content: string (required, < 10000 chars) - The note content
+    //   - updatedAt: timestamp (optional) - Last update time
+    //
     // ===============================================================
 
     // ===============================================================
@@ -114,6 +132,23 @@ service cloud.firestore {
              isValidDateString(data.createdAt);
     }
 
+    function isValidRequest(data) {
+      return data.keys().hasAll(['uid', 'email', 'reason', 'desiredDateTime', 'status']) &&
+             hasOnlyAllowedFields(['uid', 'email', 'displayName', 'reason', 'desiredDateTime', 'status', 'createdAt']) &&
+             data.uid is string &&
+             isValidEmail(data.email) &&
+             data.reason is string && data.reason.size() < 2000 &&
+             isValidDateString(data.desiredDateTime) &&
+             data.status in ['pending', 'approved', 'rejected'];
+    }
+
+    function isValidCoachNote(data) {
+      return data.keys().hasAll(['clientUid', 'content']) &&
+             hasOnlyAllowedFields(['clientUid', 'content', 'updatedAt']) &&
+             data.clientUid is string &&
+             data.content is string && data.content.size() < 10000;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -154,6 +189,24 @@ service cloud.firestore {
       allow create: if isCoach() && isValidDocument(request.resource.data);
       allow update: if isCoach() && isValidDocument(request.resource.data);
       allow delete: if isCoach();
+    }
+
+    match /requests/{requestId} {
+      // Coaches can see all requests. Clients can only see their own.
+      allow read: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.uid);
+      
+      // Clients can create requests.
+      allow create: if isAuthenticated() && isValidRequest(request.resource.data) && request.resource.data.uid == request.auth.uid;
+      
+      // Only coaches can update requests (approve/reject).
+      allow update: if isCoach() && isValidRequest(request.resource.data);
+      allow delete: if isCoach();
+    }
+
+    match /coach_notes/{clientUid} {
+      // ONLY coaches can read or write these notes.
+      allow read: if isCoach();
+      allow write: if isCoach() && isValidCoachNote(request.resource.data);
     }
   }
 }

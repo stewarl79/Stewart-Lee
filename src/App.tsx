@@ -20,9 +20,9 @@ import {
   AlertCircle,
   Menu,
   X,
-  UserPlus
+  UserPlus,
+  RefreshCw
 } from 'lucide-react';
-import logo from './assets/logo.png';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   signInWithPopup, 
@@ -57,7 +57,7 @@ import { auth, db, storage } from './firebase';
 import firebaseConfig from '../firebase-applet-config.json';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { format, isAfter, isBefore, addHours, startOfDay, endOfDay, parseISO } from 'date-fns';
+import { format, isAfter, isBefore, addHours, startOfDay, endOfDay, parseISO, differenceInHours, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay } from 'date-fns';
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -133,6 +133,19 @@ interface SharedDocument {
   createdAt: Timestamp;
 }
 
+const isCalendarId = (email: string) => {
+  return email.includes('calendar.google.com');
+};
+
+const getGoogleCalendarLink = (appt: Appointment) => {
+  const start = appt.startTime.toDate().toISOString().replace(/-|:|\.\d\d\d/g, '');
+  const end = appt.endTime.toDate().toISOString().replace(/-|:|\.\d\d\d/g, '');
+  const details = appt.description || appt.notes || '';
+  const location = appt.meetLink || '';
+  
+  return `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(appt.title)}&dates=${start}/${end}&details=${encodeURIComponent(details)}&location=${encodeURIComponent(location)}`;
+};
+
 // --- Components ---
 
 const SidebarItem = ({ 
@@ -195,6 +208,17 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [showLateNoticeModal, setShowLateNoticeModal] = useState(false);
+  const [showActionModal, setShowActionModal] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const [selectedClient, setSelectedClient] = useState<any>(null);
+  const [actionType, setActionType] = useState<'cancel' | 'reschedule'>('cancel');
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionReason, setActionReason] = useState('');
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [requestReason, setRequestReason] = useState('');
+  const [requestDate, setRequestDate] = useState('');
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -386,7 +410,7 @@ export default function App() {
           <div className="flex flex-col items-center text-center">
             <div className="w-16 h-16 mb-6">
               <img 
-                src={logo} 
+                src="/logo.png" 
                 alt="MrLeeTeaches Logo" 
                 className="w-full h-full object-contain rounded-2xl"
                 onError={(e) => {
@@ -468,18 +492,6 @@ export default function App() {
                   <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
                   Continue with Google
                 </button>
-
-                {/* Debug Button for Auth Troubleshooting */}
-                <button
-                  onClick={() => {
-                    import('../firebase-applet-config.json').then(config => {
-                      alert(`Current Hostname: ${window.location.hostname}\nFirebase Auth Domain: ${config.authDomain}\n\nPlease ensure ${window.location.hostname} is added to "Authorized Domains" in Firebase Console.`);
-                    });
-                  }}
-                  className="mt-4 w-full text-[10px] text-slate-600 hover:text-slate-400 transition-colors uppercase tracking-widest font-bold"
-                >
-                  Troubleshoot Auth Domains
-                </button>
               </>
             )}
 
@@ -517,11 +529,126 @@ export default function App() {
     );
   }
 
+  const handleReschedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAppointment) return;
+    setActionLoading(true);
+    try {
+      const response = await fetch('/api/appointments/reschedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appointmentId: selectedAppointment.id,
+          reason: actionReason,
+          desiredDateTime: rescheduleDate,
+          clientName: profile?.displayName
+        })
+      });
+      if (!response.ok) throw new Error('Failed to request reschedule');
+      setShowActionModal(false);
+      setActionReason('');
+      setRescheduleDate('');
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!selectedAppointment) return;
+    setActionLoading(true);
+    try {
+      const response = await fetch('/api/appointments/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appointmentId: selectedAppointment.id,
+          reason: actionReason,
+          clientName: profile?.displayName
+        })
+      });
+      if (!response.ok) throw new Error('Failed to cancel appointment');
+      setShowActionModal(false);
+      setActionReason('');
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setActionLoading(true);
+    try {
+      const response = await fetch('/api/appointments/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: user?.uid,
+          email: user?.email,
+          displayName: profile?.displayName,
+          reason: requestReason,
+          desiredDateTime: requestDate
+        })
+      });
+      if (!response.ok) throw new Error('Failed to submit request');
+      setShowRequestModal(false);
+      setRequestReason('');
+      setRequestDate('');
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const openAction = (appt: any, type: 'cancel' | 'reschedule') => {
+    const hoursDiff = differenceInHours(appt.startTime.toDate(), new Date());
+    if (hoursDiff <= 24) {
+      setShowLateNoticeModal(true);
+    } else {
+      setSelectedAppointment(appt);
+      setActionType(type);
+      setShowActionModal(true);
+    }
+  };
+
   const renderContent = () => {
     switch (activeTab) {
-      case 'dashboard': return <DashboardView appointments={appointments} clients={clients} documents={documents} profile={profile} setActiveTab={setActiveTab} />;
-      case 'calendar': return <CalendarView appointments={appointments} role={profile?.role} />;
-      case 'clients': return <ClientsView clients={clients} appointments={appointments} documents={documents} role={profile?.role} />;
+      case 'dashboard': return (
+        <DashboardView 
+          appointments={appointments} 
+          clients={clients} 
+          documents={documents} 
+          profile={profile} 
+          setActiveTab={setActiveTab} 
+          onRequestSession={() => setShowRequestModal(true)}
+          onAction={openAction}
+          onSelectClient={(client: any) => {
+            setSelectedClient(client);
+            setActiveTab('clients');
+          }}
+        />
+      );
+      case 'calendar': return (
+        <CalendarView 
+          appointments={appointments} 
+          role={profile?.role} 
+          onAction={openAction}
+        />
+      );
+      case 'clients': return (
+        <ClientsView 
+          clients={clients} 
+          appointments={appointments} 
+          documents={documents} 
+          role={profile?.role} 
+          selectedClient={selectedClient}
+          setSelectedClient={setSelectedClient}
+        />
+      );
       case 'documents': return <DocumentsView documents={documents} role={profile?.role} user={user} />;
       case 'reminders': return <RemindersView appointments={appointments} role={profile?.role} />;
       case 'settings': return <SettingsView profile={profile} role={profile?.role} />;
@@ -536,7 +663,7 @@ export default function App() {
         <div className="flex items-center gap-3 mb-10 px-2">
           <div className="w-10 h-10">
             <img 
-              src={logo} 
+              src="/logo.png" 
               alt="Logo" 
               className="w-full h-full object-contain rounded-xl"
               onError={(e) => {
@@ -589,7 +716,7 @@ export default function App() {
       <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 z-50">
         <div className="flex items-center gap-2">
           <img 
-            src={logo} 
+            src="/logo.png" 
             alt="Logo" 
             className="w-8 h-8 object-contain rounded-lg"
             onError={(e) => {
@@ -627,7 +754,7 @@ export default function App() {
               <div className="flex items-center justify-between mb-10">
                 <div className="flex items-center gap-3">
                   <img 
-                    src={logo} 
+                    src="/logo.png" 
                     alt="Logo" 
                     className="w-10 h-10 object-contain rounded-xl"
                     onError={(e) => {
@@ -728,28 +855,219 @@ export default function App() {
           </AnimatePresence>
         </div>
       </main>
+
+      {/* Request Session Modal */}
+      <AnimatePresence>
+        {showRequestModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !actionLoading && setShowRequestModal(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl"
+            >
+              <h3 className="text-2xl font-bold text-white mb-2">Request Session</h3>
+              <p className="text-slate-400 mb-6">Submit a request for a new coaching session. Stewart Lee will review and approve it.</p>
+              
+              <form onSubmit={handleRequest} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Reason for Session</label>
+                  <textarea 
+                    required
+                    value={requestReason}
+                    onChange={(e) => setRequestReason(e.target.value)}
+                    placeholder="Briefly describe what you'd like to discuss..."
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[100px]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Desired Day & Time</label>
+                  <input 
+                    type="datetime-local" 
+                    required
+                    value={requestDate}
+                    onChange={(e) => setRequestDate(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div className="flex gap-3 pt-4">
+                  <button 
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => setShowRequestModal(false)}
+                    className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-medium hover:bg-slate-700 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={actionLoading}
+                    className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-500 shadow-lg shadow-emerald-600/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {actionLoading ? <Clock className="w-4 h-4 animate-spin" /> : null}
+                    {actionLoading ? 'Submitting...' : 'Submit Request'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Late Notice Modal */}
+      <AnimatePresence>
+        {showLateNoticeModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowLateNoticeModal(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                <AlertCircle className="w-8 h-8 text-rose-500" />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-4">Late Notice Required</h3>
+              <p className="text-slate-400 mb-6 leading-relaxed">
+                This appointment is scheduled to start in less than 24 hours. 
+                Please get in direct contact with Stewart Lee about canceling or rescheduling.
+              </p>
+              <div className="bg-rose-500/5 border border-rose-500/20 rounded-2xl p-4 mb-8">
+                <p className="text-rose-400 text-sm italic">
+                  Reminder: The full visit charge is still due if less than 24 hours notice is given on cancellations. 
+                  Stewart Lee has discretion to waive this fee for extenuating circumstances.
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowLateNoticeModal(false)}
+                className="w-full py-3 bg-slate-800 text-white rounded-xl font-medium hover:bg-slate-700 transition-colors"
+              >
+                Got it
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Action Modal (Cancel/Reschedule) */}
+      <AnimatePresence>
+        {showActionModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !actionLoading && setShowActionModal(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl"
+            >
+              <h3 className="text-2xl font-bold text-white mb-2 capitalize">{actionType} Session</h3>
+              <p className="text-slate-400 mb-6">
+                {actionType === 'cancel' 
+                  ? 'Are you sure you want to cancel this session? An alert will be sent to Stewart Lee.' 
+                  : 'Request a new time for this session. Stewart Lee will be notified.'}
+              </p>
+              
+              <form onSubmit={actionType === 'cancel' ? (e) => { e.preventDefault(); handleCancel(); } : handleReschedule} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Reason</label>
+                  <textarea 
+                    required
+                    value={actionReason}
+                    onChange={(e) => setActionReason(e.target.value)}
+                    placeholder="Please provide a reason..."
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[80px]"
+                  />
+                </div>
+                {actionType === 'reschedule' && (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-2">Desired New Day & Time</label>
+                    <input 
+                      type="datetime-local" 
+                      required
+                      value={rescheduleDate}
+                      onChange={(e) => setRescheduleDate(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                )}
+                <div className="flex gap-3 pt-4">
+                  <button 
+                    type="button"
+                    disabled={actionLoading}
+                    onClick={() => setShowActionModal(false)}
+                    className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-medium hover:bg-slate-700 disabled:opacity-50"
+                  >
+                    Back
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={actionLoading}
+                    className={cn(
+                      "flex-1 py-3 text-white rounded-xl font-medium shadow-lg disabled:opacity-50 flex items-center justify-center gap-2",
+                      actionType === 'cancel' ? "bg-rose-600 hover:bg-rose-500 shadow-rose-600/20" : "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20"
+                    )}
+                  >
+                    {actionLoading ? <Clock className="w-4 h-4 animate-spin" /> : null}
+                    {actionLoading ? 'Processing...' : (actionType === 'cancel' ? 'Confirm Cancellation' : 'Request Reschedule')}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
 // --- View Components ---
 
-function DashboardView({ appointments, clients, documents, profile, setActiveTab }: any) {
+function DashboardView({ appointments, clients, documents, profile, setActiveTab, onRequestSession, onAction, onSelectClient }: any) {
   const nextAppointment = useMemo(() => {
-    return appointments.find(a => isAfter(a.startTime.toDate(), new Date()) && a.status === 'scheduled');
+    return appointments.find((a: any) => isAfter(a.startTime.toDate(), new Date()) && a.status === 'scheduled');
   }, [appointments]);
 
   const stats = [
     { label: 'Total Clients', value: clients.length, icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10' },
-    { label: 'Upcoming Sessions', value: appointments.filter(a => a.status === 'scheduled').length, icon: Calendar, color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
+    { label: 'Upcoming Sessions', value: appointments.filter((a: any) => a.status === 'scheduled' && isAfter(a.startTime.toDate(), new Date())).length, icon: Calendar, color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
     { label: 'Shared Docs', value: documents.length, icon: FileText, color: 'text-amber-400', bg: 'bg-amber-400/10' },
   ];
 
   return (
     <div className="space-y-8">
-      <header>
-        <h2 className="text-2xl font-bold text-white">Welcome back, {profile?.displayName?.split(' ')[0] || 'User'}</h2>
-        <p className="text-slate-400 mt-1">Here's what's happening with your coaching portal today.</p>
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Welcome back, {profile?.displayName?.split(' ')[0] || 'User'}</h2>
+          <p className="text-slate-400 mt-1">Here's what's happening with your coaching portal today.</p>
+        </div>
+        {profile?.role === 'client' && (
+          <button 
+            onClick={onRequestSession}
+            className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/20"
+          >
+            <Plus className="w-5 h-5" /> Request Session
+          </button>
+        )}
       </header>
 
       {/* Stats Grid */}
@@ -794,9 +1112,21 @@ function DashboardView({ appointments, clients, documents, profile, setActiveTab
               <div className="flex items-start justify-between mb-4">
                 <div>
                   <h4 className="text-xl font-bold text-white">{nextAppointment.title}</h4>
-                  <p className="text-slate-400 text-sm mt-1">{nextAppointment.clientEmail}</p>
+                  {!isCalendarId(nextAppointment.clientEmail) && (
+                    <p className="text-slate-400 text-sm mt-1">{nextAppointment.clientEmail}</p>
+                  )}
                 </div>
-                <Badge variant="success">Scheduled</Badge>
+                <div className="flex flex-col items-end gap-2">
+                  <Badge variant="success">Scheduled</Badge>
+                  <a 
+                    href={getGoogleCalendarLink(nextAppointment)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-emerald-500 hover:text-emerald-400 font-medium flex items-center gap-1 transition-colors"
+                  >
+                    <Calendar className="w-3 h-3" /> Add to Calendar
+                  </a>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4 mt-6">
                 <div className="flex items-center gap-3 text-slate-300">
@@ -817,6 +1147,22 @@ function DashboardView({ appointments, clients, documents, profile, setActiveTab
                 >
                   <ExternalLink className="w-4 h-4" /> Join Google Meet
                 </a>
+              )}
+              {profile?.role === 'client' && (
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <button 
+                    onClick={() => onAction(nextAppointment, 'reschedule')}
+                    className="flex items-center justify-center gap-2 bg-slate-700/50 text-slate-300 py-2.5 rounded-xl hover:bg-slate-700 transition-all text-sm font-medium"
+                  >
+                    <RefreshCw className="w-4 h-4" /> Reschedule
+                  </button>
+                  <button 
+                    onClick={() => onAction(nextAppointment, 'cancel')}
+                    className="flex items-center justify-center gap-2 bg-rose-500/10 text-rose-400 border border-rose-500/20 py-2.5 rounded-xl hover:bg-rose-500/20 transition-all text-sm font-medium"
+                  >
+                    <Trash2 className="w-4 h-4" /> Cancel
+                  </button>
+                </div>
               )}
             </div>
           ) : (
@@ -843,18 +1189,22 @@ function DashboardView({ appointments, clients, documents, profile, setActiveTab
           <div className="space-y-4">
             {profile?.role === 'coach' ? (
               clients.slice(0, 4).map((client: any) => (
-                <div key={client.uid} className="flex items-center justify-between p-3 bg-slate-800/30 rounded-xl border border-slate-700/30">
+                <button 
+                  key={client.uid} 
+                  onClick={() => onSelectClient(client)}
+                  className="w-full flex items-center justify-between p-3 bg-slate-800/30 rounded-xl border border-slate-700/30 hover:bg-slate-800/50 transition-all"
+                >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-xs">
                       {client.displayName[0]}
                     </div>
-                    <div>
+                    <div className="text-left">
                       <p className="text-sm font-medium text-white">{client.displayName}</p>
                       <p className="text-xs text-slate-500">{client.email}</p>
                     </div>
                   </div>
                   <ChevronRight className="w-4 h-4 text-slate-600" />
-                </div>
+                </button>
               ))
             ) : (
               documents.slice(0, 4).map((doc: any) => (
@@ -882,120 +1232,317 @@ function DashboardView({ appointments, clients, documents, profile, setActiveTab
   );
 }
 
-function CalendarView({ appointments, role }: any) {
+function CalendarView({ appointments, role, onAction }: any) {
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [viewMode, setViewMode] = useState<'day' | 'week'>('day');
   
   const dayAppointments = useMemo(() => {
     return appointments.filter((a: any) => {
       const date = a.startTime.toDate();
-      return date.getDate() === selectedDate.getDate() &&
-             date.getMonth() === selectedDate.getMonth() &&
-             date.getFullYear() === selectedDate.getFullYear();
+      return isSameDay(date, selectedDate);
     });
   }, [appointments, selectedDate]);
 
+  const weekDays = useMemo(() => {
+    const start = startOfWeek(selectedDate);
+    const end = endOfWeek(selectedDate);
+    return eachDayOfInterval({ start, end });
+  }, [selectedDate]);
+
   return (
     <div className="space-y-8">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-white">Coaching Calendar</h2>
           <p className="text-slate-400 mt-1">Manage and view your scheduled sessions.</p>
         </div>
-        {role === 'coach' && (
-          <button 
-            onClick={async () => {
-              try {
-                await fetch('/api/sync-calendar', { method: 'POST' });
-                alert('Sync initiated! Refreshing in a moment...');
-              } catch (e) {
-                console.error(e);
-              }
-            }}
-            className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-500 transition-colors"
-          >
-            <Plus className="w-4 h-4" /> Sync Calendar
-          </button>
-        )}
+        <div className="flex items-center gap-4">
+          <div className="bg-slate-900 border border-slate-800 p-1 rounded-xl flex">
+            <button 
+              onClick={() => setViewMode('day')}
+              className={cn(
+                "px-4 py-2 rounded-lg text-sm font-bold transition-all",
+                viewMode === 'day' ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" : "text-slate-400 hover:text-white"
+              )}
+            >
+              Daily
+            </button>
+            <button 
+              onClick={() => setViewMode('week')}
+              className={cn(
+                "px-4 py-2 rounded-lg text-sm font-bold transition-all",
+                viewMode === 'week' ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" : "text-slate-400 hover:text-white"
+              )}
+            >
+              Weekly
+            </button>
+          </div>
+          {role === 'coach' && (
+            <button 
+              onClick={async () => {
+                try {
+                  await fetch('/api/sync-calendar', { method: 'POST' });
+                  alert('Sync initiated! Refreshing in a moment...');
+                } catch (e) {
+                  console.error(e);
+                }
+              }}
+              className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-500 transition-colors"
+            >
+              <Plus className="w-4 h-4" /> Sync Calendar
+            </button>
+          )}
+        </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Simple Calendar Picker Placeholder */}
-        <Card title="Select Date" className="lg:col-span-1">
-          <div className="space-y-4">
-            <input 
-              type="date" 
-              value={format(selectedDate, 'yyyy-MM-dd')}
-              onChange={(e) => {
-                if (!e.target.value) return;
-                const [year, month, day] = e.target.value.split('-').map(Number);
-                setSelectedDate(new Date(year, month - 1, day));
-              }}
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-            <div className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/30">
-              <p className="text-sm text-slate-400 mb-2">Selected Date</p>
-              <p className="text-lg font-bold text-white">{format(selectedDate, 'EEEE, MMMM do')}</p>
-            </div>
-          </div>
-        </Card>
-
-        {/* Appointments List for Day */}
-        <Card title={`Sessions for ${format(selectedDate, 'MMM d')}`} className="lg:col-span-2">
-          <div className="space-y-4">
-            {dayAppointments.length > 0 ? (
-              dayAppointments.map((appt: any) => (
-                <div key={appt.id} className="group bg-slate-800/50 hover:bg-slate-800 border border-slate-700/50 rounded-2xl p-5 transition-all">
-                  <div className="flex items-start justify-between">
-                    <div className="flex gap-4">
-                      <div className="flex flex-col items-center justify-center w-16 h-16 bg-slate-900 rounded-xl border border-slate-700">
-                        <span className="text-xs font-bold text-emerald-500 uppercase">{format(appt.startTime.toDate(), 'h:mm')}</span>
-                        <span className="text-xs text-slate-500">{format(appt.startTime.toDate(), 'a')}</span>
-                      </div>
-                      <div>
-                        <h4 className="text-lg font-bold text-white group-hover:text-emerald-400 transition-colors">{appt.title}</h4>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Mail className="w-3 h-3 text-slate-500" />
-                          <span className="text-xs text-slate-400">{appt.clientEmail}</span>
-                          {appt.isExternal && <Badge variant="warning">External</Badge>}
-                          {appt.meetLink && (
-                            <a 
-                              href={appt.meetLink} 
-                              target="_blank" 
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-1 text-emerald-500 hover:text-emerald-400 ml-2"
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              <span className="text-[10px] font-bold uppercase">Meet</span>
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <Badge variant={appt.status === 'scheduled' ? 'success' : 'default'}>
-                      {appt.status}
-                    </Badge>
-                  </div>
-                  {appt.description && (
-                    <p className="text-sm text-slate-500 mt-4 pl-20 border-l-2 border-slate-700 italic">
-                      {appt.description}
-                    </p>
-                  )}
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-20 bg-slate-800/10 rounded-2xl border border-dashed border-slate-800">
-                <Clock className="w-12 h-12 text-slate-800 mx-auto mb-4" />
-                <p className="text-slate-600">No sessions scheduled for this day.</p>
+      {viewMode === 'day' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Simple Calendar Picker Placeholder */}
+          <Card title="Select Date" className="lg:col-span-1">
+            <div className="space-y-4">
+              <input 
+                type="date" 
+                value={format(selectedDate, 'yyyy-MM-dd')}
+                onChange={(e) => {
+                  if (!e.target.value) return;
+                  const [year, month, day] = e.target.value.split('-').map(Number);
+                  setSelectedDate(new Date(year, month - 1, day));
+                }}
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              <div className="p-4 bg-slate-800/30 rounded-xl border border-slate-700/30">
+                <p className="text-sm text-slate-400 mb-2">Selected Date</p>
+                <p className="text-lg font-bold text-white">{format(selectedDate, 'EEEE, MMMM do')}</p>
               </div>
-            )}
+            </div>
+          </Card>
+
+          {/* Appointments List for Day */}
+          <Card title={`Sessions for ${format(selectedDate, 'MMM d')}`} className="lg:col-span-2">
+            <div className="space-y-4">
+              {dayAppointments.length > 0 ? (
+                dayAppointments.map((appt: any) => (
+                  <AppointmentCard key={appt.id} appt={appt} role={role} onAction={onAction} />
+                ))
+              ) : (
+                <div className="text-center py-20 bg-slate-800/10 rounded-2xl border border-dashed border-slate-800">
+                  <Clock className="w-12 h-12 text-slate-800 mx-auto mb-4" />
+                  <p className="text-slate-600">No sessions scheduled for this day.</p>
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between bg-slate-900 border border-slate-800 p-4 rounded-2xl">
+            <button 
+              onClick={() => setSelectedDate(addHours(selectedDate, -24 * 7))}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all"
+            >
+              <ChevronRight className="w-5 h-5 rotate-180" />
+            </button>
+            <h3 className="text-lg font-bold text-white">
+              {format(startOfWeek(selectedDate), 'MMM d')} — {format(endOfWeek(selectedDate), 'MMM d, yyyy')}
+            </h3>
+            <button 
+              onClick={() => setSelectedDate(addHours(selectedDate, 24 * 7))}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
           </div>
-        </Card>
-      </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-7 gap-4">
+            {weekDays.map((day) => {
+              const dayAppts = appointments.filter((a: any) => isSameDay(a.startTime.toDate(), day));
+              const isToday = isSameDay(day, new Date());
+              const isSelected = isSameDay(day, selectedDate);
+
+              return (
+                <div 
+                  key={day.toString()} 
+                  className={cn(
+                    "flex flex-col min-h-[200px] bg-slate-900 border rounded-2xl overflow-hidden transition-all",
+                    isToday ? "border-emerald-500/50 shadow-lg shadow-emerald-500/5" : "border-slate-800",
+                    isSelected && !isToday ? "border-slate-600" : ""
+                  )}
+                >
+                  <div className={cn(
+                    "p-3 text-center border-b",
+                    isToday ? "bg-emerald-500/10 border-emerald-500/20" : "bg-slate-800/30 border-slate-800"
+                  )}>
+                    <p className={cn("text-[10px] font-bold uppercase tracking-wider", isToday ? "text-emerald-400" : "text-slate-500")}>
+                      {format(day, 'EEE')}
+                    </p>
+                    <p className={cn("text-lg font-bold", isToday ? "text-white" : "text-slate-300")}>
+                      {format(day, 'd')}
+                    </p>
+                  </div>
+                  <div className="flex-1 p-2 space-y-2 overflow-y-auto max-h-[300px]">
+                    {dayAppts.length > 0 ? (
+                      dayAppts.map((appt: any) => (
+                        <button
+                          key={appt.id}
+                          onClick={() => {
+                            setSelectedDate(day);
+                            setViewMode('day');
+                          }}
+                          className="w-full text-left p-2 bg-slate-800/50 hover:bg-slate-800 border border-slate-700/50 rounded-lg transition-all group"
+                        >
+                          <p className="text-[10px] font-bold text-emerald-500 mb-0.5">{format(appt.startTime.toDate(), 'h:mm a')}</p>
+                          <p className="text-xs font-medium text-white truncate group-hover:text-emerald-400">{appt.title}</p>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="h-full flex items-center justify-center opacity-20">
+                        <Clock className="w-4 h-4 text-slate-500" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function ClientsView({ clients, appointments, documents, role }: any) {
+function AppointmentCard({ appt, role, onAction }: any) {
+  return (
+    <div className="group bg-slate-800/50 hover:bg-slate-800 border border-slate-700/50 rounded-2xl p-5 transition-all">
+      <div className="flex items-start justify-between">
+        <div className="flex gap-4">
+          <div className="flex flex-col items-center justify-center w-16 h-16 bg-slate-900 rounded-xl border border-slate-700">
+            <span className="text-xs font-bold text-emerald-500 uppercase">{format(appt.startTime.toDate(), 'h:mm')}</span>
+            <span className="text-xs text-slate-500">{format(appt.startTime.toDate(), 'a')}</span>
+          </div>
+          <div>
+            <h4 className="text-lg font-bold text-white group-hover:text-emerald-400 transition-colors">{appt.title}</h4>
+            <div className="flex items-center gap-2 mt-1">
+              {!isCalendarId(appt.clientEmail) && (
+                <>
+                  <Mail className="w-3 h-3 text-slate-500" />
+                  <span className="text-xs text-slate-400">{appt.clientEmail}</span>
+                </>
+              )}
+              <a 
+                href={getGoogleCalendarLink(appt)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] text-emerald-500 hover:text-emerald-400 font-bold uppercase flex items-center gap-1 ml-2"
+              >
+                <Calendar className="w-3 h-3" /> Add to Calendar
+              </a>
+              {appt.meetLink && (
+                <a 
+                  href={appt.meetLink} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-emerald-500 hover:text-emerald-400 ml-2"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span className="text-[10px] font-bold uppercase">Meet</span>
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+        <Badge variant={appt.status === 'scheduled' ? 'success' : 'default'}>
+          {appt.status}
+        </Badge>
+      </div>
+      {appt.description && (
+        <p className="text-sm text-slate-500 mt-4 pl-20 border-l-2 border-slate-700 italic">
+          {appt.description}
+        </p>
+      )}
+      {role === 'client' && appt.status === 'scheduled' && (
+        <div className="flex gap-3 mt-4 pl-20">
+          <button 
+            onClick={() => onAction(appt, 'reschedule')}
+            className="flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-white transition-colors uppercase tracking-wider"
+          >
+            <RefreshCw className="w-3 h-3" /> Reschedule
+          </button>
+          <button 
+            onClick={() => onAction(appt, 'cancel')}
+            className="flex items-center gap-2 text-xs font-bold text-rose-500/70 hover:text-rose-400 transition-colors uppercase tracking-wider"
+          >
+            <Trash2 className="w-3 h-3" /> Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CoachNotesSection({ clientUid }: { clientUid: string }) {
+  const [note, setNote] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'coach_notes', clientUid), (docSnap) => {
+      if (docSnap.exists()) {
+        setNote(docSnap.data().content);
+      } else {
+        setNote('');
+      }
+      setLoading(false);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.GET, `coach_notes/${clientUid}`);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [clientUid]);
+
+  const handleSave = async () => {
+    if (loading) return;
+    setSaving(true);
+    try {
+      await setDoc(doc(db, 'coach_notes', clientUid), {
+        clientUid,
+        content: note,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `coach_notes/${clientUid}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-slate-800/20 rounded-2xl border border-slate-800 p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Private Coach Notes</h4>
+        {loading ? (
+          <span className="text-[10px] text-slate-600 animate-pulse uppercase font-bold">Loading...</span>
+        ) : saving ? (
+          <span className="text-[10px] text-emerald-500 animate-pulse uppercase font-bold">Saving...</span>
+        ) : (
+          <span className="text-[10px] text-slate-600 uppercase font-bold">Auto-saves on blur</span>
+        )}
+      </div>
+      {loading ? (
+        <div className="w-full h-[150px] bg-slate-900/50 border border-slate-700 rounded-xl animate-pulse" />
+      ) : (
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onBlur={handleSave}
+          placeholder="Add private notes about this client here... (Not visible to client)"
+          className="w-full bg-slate-900/50 border border-slate-700 rounded-xl p-4 text-sm text-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[150px] resize-none"
+        />
+      )}
+    </div>
+  );
+}
+
+function ClientsView({ clients, appointments, documents, role, selectedClient, setSelectedClient }: any) {
   const [searchTerm, setSearchTerm] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -1004,7 +1551,6 @@ function ClientsView({ clients, appointments, documents, role }: any) {
   const [isInviting, setIsInviting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clientToDelete, setClientToDelete] = useState<any>(null);
-  const [selectedClient, setSelectedClient] = useState<any>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const filteredClients = clients.filter((c: any) => 
@@ -1279,7 +1825,17 @@ function ClientsView({ clients, appointments, documents, role }: any) {
                               <p className="text-xs text-slate-500">{format(appt.startTime.toDate(), 'MMM d, yyyy • h:mm a')}</p>
                             </div>
                           </div>
-                          <Badge variant={appt.status === 'scheduled' ? 'success' : 'default'}>{appt.status}</Badge>
+                          <div className="flex flex-col items-end gap-2">
+                            <Badge variant={appt.status === 'scheduled' ? 'success' : 'default'}>{appt.status}</Badge>
+                            <a 
+                              href={getGoogleCalendarLink(appt)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[10px] text-emerald-500 hover:text-emerald-400 font-bold uppercase flex items-center gap-1"
+                            >
+                              <Calendar className="w-3 h-3" /> Add
+                            </a>
+                          </div>
                         </div>
                       ))}
                     {appointments.filter((a: any) => a.clientEmail === selectedClient.email && isAfter(a.startTime.toDate(), new Date())).length === 0 && (
@@ -1354,6 +1910,12 @@ function ClientsView({ clients, appointments, documents, role }: any) {
                 </div>
               </div>
 
+              {role === 'coach' && (
+                <div className="mb-8">
+                  <CoachNotesSection clientUid={selectedClient.uid} />
+                </div>
+              )}
+
               <button 
                 onClick={() => setSelectedClient(null)}
                 className="w-full py-3 bg-slate-800 text-slate-300 rounded-xl font-medium hover:bg-slate-700 transition-colors"
@@ -1420,9 +1982,10 @@ function ClientsView({ clients, appointments, documents, role }: any) {
                     type="tel" 
                     value={invitePhone}
                     onChange={(e) => setInvitePhone(e.target.value)}
-                    placeholder="+1 (555) 000-0000"
+                    placeholder="864-209-1043"
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
+                  <p className="text-[10px] text-slate-500 mt-2 ml-1">Format: 10 digits (e.g. 8642091043) or include country code (e.g. +1...)</p>
                 </div>
                 <div className="flex gap-3 pt-4">
                   <button 

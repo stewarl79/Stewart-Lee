@@ -47,6 +47,32 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Upload time" }
       },
       "required": ["name", "url", "ownerUid", "sharedWithEmail"]
+    },
+    "AppointmentRequest": {
+      "title": "Appointment Request",
+      "description": "Session request from a client.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Client's UID" },
+        "email": { "type": "string", "format": "email", "description": "Client's email" },
+        "displayName": { "type": "string", "description": "Client's name" },
+        "reason": { "type": "string", "description": "Reason for the session" },
+        "desiredDateTime": { "type": "string", "format": "date-time", "description": "Requested date and time" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"], "description": "Request status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Request time" }
+      },
+      "required": ["uid", "email", "reason", "desiredDateTime", "status"]
+    },
+    "CoachNote": {
+      "title": "Coach Note",
+      "description": "Private notes about a client, visible only to the coach.",
+      "type": "object",
+      "properties": {
+        "clientUid": { "type": "string", "description": "Client's UID" },
+        "content": { "type": "string", "description": "The note content" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update time" }
+      },
+      "required": ["clientUid", "content"]
     }
   },
   "firestore": {
@@ -61,6 +87,14 @@
     "/documents/{documentId}": {
       "schema": "Document",
       "description": "Shared documents"
+    },
+    "/requests/{requestId}": {
+      "schema": "AppointmentRequest",
+      "description": "Session requests"
+    },
+    "/coach_notes/{clientUid}": {
+      "schema": "CoachNote",
+      "description": "Private coach notes"
     }
   }
 }
