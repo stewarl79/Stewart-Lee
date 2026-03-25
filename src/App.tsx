@@ -303,6 +303,7 @@ export default function App() {
       setAuthError('');
       await signInWithPopup(auth, new GoogleAuthProvider());
     } catch (error: any) {
+      console.error('Google Login Error:', error);
       setAuthError(error.message);
     }
   };
@@ -466,6 +467,18 @@ export default function App() {
                 >
                   <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
                   Continue with Google
+                </button>
+
+                {/* Debug Button for Auth Troubleshooting */}
+                <button
+                  onClick={() => {
+                    import('../firebase-applet-config.json').then(config => {
+                      alert(`Current Hostname: ${window.location.hostname}\nFirebase Auth Domain: ${config.authDomain}\n\nPlease ensure ${window.location.hostname} is added to "Authorized Domains" in Firebase Console.`);
+                    });
+                  }}
+                  className="mt-4 w-full text-[10px] text-slate-600 hover:text-slate-400 transition-colors uppercase tracking-widest font-bold"
+                >
+                  Troubleshoot Auth Domains
                 </button>
               </>
             )}
