@@ -73,11 +73,13 @@ async function startServer() {
 
   app.use(express.json());
 
+  app.set("trust proxy", true);
+
   // Force HTTPS redirect for custom domains
   app.use((req, res, next) => {
-    if (process.env.NODE_ENV === "production" && req.headers["x-forwarded-proto"] !== "https") {
-      // Use APP_URL if available to avoid redirecting to localhost if the proxy is misconfigured
-      const host = process.env.APP_URL ? new URL(process.env.APP_URL).host : req.headers.host;
+    if (process.env.NODE_ENV === "production" && !req.secure) {
+      // Use the current host to preserve the domain (e.g. custom domain vs cloud run url)
+      const host = req.headers.host;
       
       // Safety check: never redirect to localhost in production
       if (host && !host.includes('localhost')) {
