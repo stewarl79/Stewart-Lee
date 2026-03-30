@@ -32,7 +32,8 @@ import {
   ShieldCheck,
   FileCheck,
   ArrowRight,
-  ArrowLeft
+  ArrowLeft,
+  Wrench
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
@@ -520,7 +521,6 @@ export default function App() {
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
     typeof Notification !== 'undefined' ? Notification.permission : 'default'
   );
-  const isInitialMessagesLoad = React.useRef(true);
 
   useEffect(() => {
     if ('serviceWorker' in navigator) {
@@ -731,6 +731,8 @@ export default function App() {
   useEffect(() => {
     if (!user || !profile) return;
 
+    let isInitialSnapshot = true;
+
     // We need two queries for messages to get both sent and received
     const sentMessagesQuery = query(collection(db, 'messages'), where('senderUid', '==', user.uid));
     const receivedMessagesQuery = query(collection(db, 'messages'), where('receiverUid', '==', user.uid));
@@ -749,12 +751,13 @@ export default function App() {
       const received = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Message));
       
       // Handle notifications for new messages
-      if (!isInitialMessagesLoad.current && notificationPermission === 'granted') {
+      // We skip the initial snapshot of each listener to avoid duplicate notifications on re-renders
+      if (!isInitialSnapshot && notificationPermission === 'granted') {
         snapshot.docChanges().forEach(change => {
           if (change.type === 'added') {
             const msg = change.doc.data() as Message;
-            // Only notify for messages from others
-            if (msg.senderUid !== user.uid) {
+            // Only notify for unread messages from others
+            if (msg.senderUid !== user.uid && !msg.isRead) {
               const sender = profile?.role === 'coach' 
                 ? clients.find(c => c.uid === msg.senderUid)?.displayName || 'Client'
                 : 'Coach';
@@ -768,7 +771,7 @@ export default function App() {
           }
         });
       }
-      isInitialMessagesLoad.current = false;
+      isInitialSnapshot = false;
 
       setMessages(prev => {
         const other = prev.filter(m => m.receiverUid !== user.uid);
@@ -1190,6 +1193,7 @@ export default function App() {
         />
       );
       case 'library': return <LibraryView clients={clients} user={user} />;
+      case 'tools': return <ToolsLibraryView />;
       case 'documents': return <DocumentsView documents={documents} role={profile?.role} user={user} />;
       case 'reminders': return (
         <RemindersView 
@@ -1238,6 +1242,7 @@ export default function App() {
         <nav className="flex-1 space-y-2">
           <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
           <SidebarItem icon={Calendar} label="Calendar" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
+          <SidebarItem icon={Wrench} label="Tools Library" active={activeTab === 'tools'} onClick={() => setActiveTab('tools')} />
           {profile?.role === 'coach' && (
             <>
               <SidebarItem icon={Users} label="Clients" active={activeTab === 'clients'} onClick={() => setActiveTab('clients')} />
@@ -1347,6 +1352,7 @@ export default function App() {
               <nav className="space-y-2">
                 <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setSidebarOpen(false); }} />
                 <SidebarItem icon={Calendar} label="Calendar" active={activeTab === 'calendar'} onClick={() => { setActiveTab('calendar'); setSidebarOpen(false); }} />
+                <SidebarItem icon={Wrench} label="Tools Library" active={activeTab === 'tools'} onClick={() => { setActiveTab('tools'); setSidebarOpen(false); }} />
                 {profile?.role === 'coach' && (
                   <>
                     <SidebarItem icon={Users} label="Clients" active={activeTab === 'clients'} onClick={() => { setActiveTab('clients'); setSidebarOpen(false); }} />
@@ -4320,6 +4326,50 @@ function ClientsView({ clients, appointments, documents, role, selectedClient, s
           </div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// --- Tools Library ---
+
+const TOOLS = [
+  
+  {
+    name: "Energy Balance Dashboard",
+    description: "The Energy Balance Dashboard is a low-friction tool designed to help you visualize your daily capacity and prevent burnout using the principles of Energy Accounting. Simply log your morning readiness using the quick slider, then tap to rate your daily activities as either energy 'drains' or restorative 'deposits'. The dashboard automatically graphs your trends so you can easily see what depletes your battery, proactively plan your recovery time, and export a one-click summary for our coaching sessions.",
+    link: "https://script.google.com/macros/s/AKfycbweI30Ufi6n9vAPRsJGf_9duWFbIQ396LWvQUhuPP1q30oWbkp8EMaBgUFquFJG8yfIqA/exec"
+  }
+];
+
+function ToolsLibraryView() {
+  return (
+    <div className="space-y-8">
+      <header>
+        <h2 className="text-2xl font-bold text-white">Tools Library</h2>
+        <p className="text-slate-400 mt-1">Access useful Apps Script applications and tools.</p>
+      </header>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {TOOLS.map((tool, index) => (
+          <div key={index} className="bg-slate-900 border border-slate-800 p-6 rounded-2xl group hover:border-emerald-500/50 transition-all flex flex-col">
+            <div className="w-12 h-12 bg-emerald-600/10 rounded-xl flex items-center justify-center text-emerald-500 mb-4">
+              <Wrench className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-semibold text-white mb-2">{tool.name}</h3>
+            <p className="text-sm text-slate-400 mb-6 flex-1 leading-relaxed">
+              {tool.description}
+            </p>
+            <a 
+              href={tool.link} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full py-3 bg-slate-800 text-white rounded-xl font-medium hover:bg-emerald-600 transition-all group-hover:shadow-lg group-hover:shadow-emerald-600/10"
+            >
+              Open Tool <ExternalLink className="w-4 h-4" />
+            </a>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
