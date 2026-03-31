@@ -4343,6 +4343,11 @@ const TOOLS = [
     name: "Task Deconstructor",
     description: "The Task Deconstructor is a low-friction tool designed to help you bypass executive dysfunction and overcome the paralysis of getting started. Simply type in an overwhelming task and click 'Deconstruct For Me' to let the app automatically break your goal into microscopic, highly specific actions. Once you begin, the tool activates Tunnel Vision by hiding the overarching list and displaying only one single step on the screen at a time. Just focus on the action in front of you, click the 'Done' button when finished, and seamlessly build momentum until the entire project is cleared.",
     link: "https://script.google.com/macros/s/AKfycbxxSdjN86vzQHKZKL2E8hbP8q7EpoV_2Fw1ATDW-qjIjhnBOw9HANpjEz-T5A0nRQUnZA/exec"
+  },
+  {
+    name: "Time-Blindness Visualizer",
+    description: "The Time-Blindness Visualizer is a sensory-friendly pacing tool designed to replace anxiety-inducing numerical countdowns with a low-demand visual representation of time. Simply select or type in your desired duration, and the screen will display five green energy blocks that gently drain in halves as time passes, allowing you to gauge your remaining "time volume" at a quick glance without doing mental math. When your session is complete, a soft, harmonic singing bowl chime provides a gentle cue to transition, allowing you to easily reset for your next focused chunk of work. This tool is built specifically to protect your working memory and help you pace your energy without triggering demand avoidance.",
+    link: "https://script.google.com/macros/s/AKfycbxVvlVK0cWsvZYnQagg64by2xYbT_H3jwrZRS-v9QAzThwUzVGMmWQx8_qDJtQzVyzN/exec"
   }
 ];
 
