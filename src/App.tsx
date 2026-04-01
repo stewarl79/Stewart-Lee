@@ -4348,6 +4348,11 @@ const TOOLS = [
     name: "Time-Blindness Visualizer",
     description: `The Time-Blindness Visualizer is a sensory-friendly pacing tool designed to replace anxiety-inducing numerical countdowns with a low-demand visual representation of time. Simply select or type in your desired duration, and the screen will display five green energy blocks that gently drain in halves as time passes, allowing you to gauge your remaining "time volume" at a quick glance without doing mental math. When your session is complete, a soft, harmonic singing bowl chime provides a gentle cue to transition, allowing you to easily reset for your next focused chunk of work. This tool is built specifically to protect your working memory and help you pace your energy without triggering demand avoidance.`,
     link: "https://script.google.com/macros/s/AKfycbxVvlVK0cWsvZYnQagg64by2xYbT_H3jwrZRS-v9QAzThwUzVGMmWQx8_qDJtQzVyzN/exec"
+  },
+  {
+    name: "Frictionless Brain Dump",
+    description: `The Frictionless Brain Dump is designed to help you instantly externalize your working memory without the executive function tax of organizing your thoughts on the spot. Whether you have a sudden idea, a looming task, or simply need to process an emotion, just type or dictate your raw thoughts into the single text box and hit save. Every evening at 5:00 PM, the system automatically reviews your raw notes, sorts them into Tasks, Ideas, and Emotional Check-ins, and delivers a clean, organized digest straight to your inbox.`,
+    link: "https://script.google.com/macros/s/AKfycbyeZcpKBSxDjerhMvvjsu90oQIPjy6cOAs6o6Qzrct1qKtGi5vEQLOseALfkufH-uJl/exec"
   }
 ];
 
