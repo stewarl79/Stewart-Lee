@@ -1,1 +1,23 @@
 @import "tailwindcss";
+
+@theme {
+  --color-brand-primary: #312e81;
+  --color-brand-secondary: #6d28d9;
+  --color-brand-hospitality: #fafaf9;
+  --color-brand-focus: #0f172a;
+  --color-brand-accent: #7c3aed;
+  --color-brand-surface: #1e293b;
+  
+  --radius-bento: 2rem;
+}
+
+@layer base {
+  body {
+    @apply bg-brand-focus text-slate-100;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+}

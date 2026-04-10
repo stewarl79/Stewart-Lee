@@ -267,6 +267,24 @@ service cloud.firestore {
              data.catchAllAfterEnd is bool;
     }
 
+    function isValidReflectionTemplate(data) {
+      return data.keys().hasAll(['coachUid', 'questions', 'isEnabled']) &&
+             hasOnlyAllowedFields(['coachUid', 'clientUid', 'questions', 'isEnabled', 'updatedAt']) &&
+             data.coachUid == request.auth.uid &&
+             data.questions is list && data.questions.size() < 20 &&
+             data.isEnabled is bool;
+    }
+
+    function isValidReflection(data) {
+      return data.keys().hasAll(['clientUid', 'appointmentId', 'responses', 'status', 'createdAt']) &&
+             hasOnlyAllowedFields(['clientUid', 'appointmentId', 'sessionDate', 'responses', 'status', 'createdAt', 'updatedAt']) &&
+             data.clientUid == request.auth.uid &&
+             data.appointmentId is string &&
+             data.responses is map &&
+             data.status in ['draft', 'submitted'] &&
+             data.createdAt is timestamp;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -384,6 +402,20 @@ service cloud.firestore {
       // Coaches can read and write sync settings.
       allow read: if isCoach();
       allow write: if isCoach() && isValidSyncConfig(request.resource.data);
+    }
+
+    match /reflection_templates/{templateId} {
+      // Coaches can manage all templates. Clients can read templates assigned to them.
+      allow read: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.clientUid);
+      allow write: if isCoach() && isValidReflectionTemplate(request.resource.data);
+    }
+
+    match /reflections/{reflectionId} {
+      // Coaches can read all reflections. Clients can read and write their own.
+      allow read: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.clientUid);
+      allow create: if isAuthenticated() && isValidReflection(request.resource.data);
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.clientUid && isValidReflection(request.resource.data);
+      allow delete: if isCoach() || (isAuthenticated() && request.auth.uid == resource.data.clientUid);
     }
   }
 }

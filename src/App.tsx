@@ -35,7 +35,11 @@ import {
   ClipboardCheck,
   ArrowRight,
   ArrowLeft,
-  Wrench
+  Wrench,
+  Zap,
+  Layers,
+  Hourglass,
+  Brain
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
@@ -198,6 +202,26 @@ interface Appointment {
   meetLink?: string;
 }
 
+interface ReflectionTemplate {
+  id: string;
+  coachUid: string;
+  clientUid?: string;
+  questions: string[];
+  isEnabled: boolean;
+  updatedAt: any;
+}
+
+interface Reflection {
+  id: string;
+  clientUid: string;
+  appointmentId: string;
+  sessionDate: string;
+  responses: Record<string, string>;
+  status: 'draft' | 'submitted';
+  createdAt: any;
+  updatedAt: any;
+}
+
 interface SharedDocument {
   id: string;
   name: string;
@@ -285,21 +309,22 @@ const SidebarItem = ({
 }) => (
   <button
     onClick={onClick}
+    aria-current={active ? 'page' : undefined}
     className={cn(
-      "w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 group",
+      "w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 group focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 focus:ring-offset-brand-focus",
       active 
-        ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" 
-        : "text-slate-400 hover:bg-slate-800 hover:text-white"
+        ? "bg-brand-accent text-white shadow-lg shadow-brand-accent/20" 
+        : "text-slate-400 hover:bg-brand-surface hover:text-white"
     )}
   >
     <div className="flex items-center gap-3">
-      <Icon className={cn("w-5 h-5", active ? "text-white" : "group-hover:text-emerald-400")} />
+      <Icon className={cn("w-5 h-5", active ? "text-white" : "group-hover:text-brand-accent")} />
       <span className="font-medium">{label}</span>
     </div>
     {badge !== undefined && badge > 0 && (
       <span className={cn(
         "px-2 py-0.5 text-[10px] font-bold rounded-full",
-        active ? "bg-white text-emerald-600" : "bg-emerald-500 text-white"
+        active ? "bg-white text-brand-accent" : "bg-brand-accent text-white"
       )}>
         {badge}
       </span>
@@ -308,10 +333,10 @@ const SidebarItem = ({
 );
 
 const Card = ({ children, title, subtitle, action, className }: any) => (
-  <div className={cn("bg-slate-900 border border-slate-800 rounded-2xl p-6 overflow-hidden", className)}>
+  <div className={cn("bg-brand-surface border border-slate-800/50 rounded-2xl p-6 overflow-hidden shadow-xl", className)}>
     <div className="flex items-center justify-between mb-6">
       <div>
-        <h3 className="text-lg font-semibold text-white">{title}</h3>
+        <h3 className="text-lg font-semibold text-white tracking-tight">{title}</h3>
         {subtitle && <p className="text-sm text-slate-400 mt-1">{subtitle}</p>}
       </div>
       {action && <div>{action}</div>}
@@ -323,7 +348,7 @@ const Card = ({ children, title, subtitle, action, className }: any) => (
 const Badge = ({ children, variant = 'default' }: { children: React.ReactNode; variant?: 'default' | 'success' | 'warning' | 'error' }) => {
   const variants = {
     default: "bg-slate-800 text-slate-300",
-    success: "bg-emerald-900/30 text-emerald-400 border border-emerald-800/50",
+    success: "bg-brand-accent/10 text-brand-accent border border-brand-accent/20",
     warning: "bg-amber-900/30 text-amber-400 border border-amber-800/50",
     error: "bg-rose-900/30 text-rose-400 border border-rose-800/50"
   };
@@ -340,10 +365,14 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
   const [goals, setGoals] = useState<Goal[]>([]);
   const [habits, setHabits] = useState<Habit[]>([]);
   const [metrics, setMetrics] = useState<SubjectiveMetric[]>([]);
+  const [reflectionTemplate, setReflectionTemplate] = useState<ReflectionTemplate | null>(null);
+  const [reflections, setReflections] = useState<Reflection[]>([]);
   const [loading, setLoading] = useState(true);
   const [showGoalModal, setShowGoalModal] = useState(false);
   const [showHabitModal, setShowHabitModal] = useState(false);
   const [showMetricModal, setShowMetricModal] = useState(false);
+  const [showReflectionBuilder, setShowReflectionBuilder] = useState(false);
+  const [showReflectionHistory, setShowReflectionHistory] = useState(false);
   const [newGoal, setNewGoal] = useState({ title: '', description: '', targetDate: '', progress: 0 });
   const [newHabit, setNewHabit] = useState({ 
     name: '', 
@@ -358,6 +387,12 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
     highAnchor: ''
   });
   const [isSaving, setIsSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    id: string;
+    type: 'habit' | 'metric' | 'goal';
+    name: string;
+    onConfirm: () => Promise<void>;
+  } | null>(null);
 
   useEffect(() => {
     if (!client?.uid) return;
@@ -398,10 +433,36 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
       handleFirestoreError(error, OperationType.LIST, 'subjective_metrics');
     });
 
+    const templateQuery = query(
+      collection(db, 'reflection_templates'),
+      where('clientUid', '==', client.uid),
+      limit(1)
+    );
+
+    const unsubTemplate = onSnapshot(templateQuery, (snapshot) => {
+      if (!snapshot.empty) {
+        setReflectionTemplate({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as ReflectionTemplate);
+      } else {
+        setReflectionTemplate(null);
+      }
+    });
+
+    const reflectionsQuery = query(
+      collection(db, 'reflections'),
+      where('clientUid', '==', client.uid),
+      orderBy('sessionDate', 'desc')
+    );
+
+    const unsubReflections = onSnapshot(reflectionsQuery, (snapshot) => {
+      setReflections(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reflection)));
+    });
+
     return () => {
       unsubGoals();
       unsubHabits();
       unsubMetrics();
+      unsubTemplate();
+      unsubReflections();
     };
   }, [client.uid]);
 
@@ -496,10 +557,31 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
     }
   };
 
+  const handleSaveTemplate = async (data: Partial<ReflectionTemplate>) => {
+    if (!auth.currentUser) return;
+    try {
+      const templateRef = reflectionTemplate 
+        ? doc(db, 'reflection_templates', reflectionTemplate.id)
+        : doc(collection(db, 'reflection_templates'));
+      
+      await setDoc(templateRef, {
+        ...data,
+        coachUid: auth.currentUser.uid,
+        clientUid: client.uid,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      setShowReflectionBuilder(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'reflection_templates');
+    }
+  };
+
+  const lastReflection = reflections[0];
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <RefreshCw className="w-8 h-8 text-emerald-500 animate-spin" />
+        <RefreshCw className="w-8 h-8 text-brand-accent animate-spin" />
       </div>
     );
   }
@@ -510,31 +592,38 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
         <div className="flex items-center gap-4">
           <button 
             onClick={onBack}
-            className="p-2 bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-colors"
+            className="p-2 bg-brand-surface text-slate-400 hover:text-white rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-brand-accent"
+            aria-label="Back to Clients"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <h2 className="text-2xl font-bold text-white">Coaching Dashboard</h2>
-            <p className="text-slate-400 mt-1">Strategic overview for <span className="text-emerald-400 font-semibold">{client.displayName}</span></p>
+            <h2 className="text-2xl font-bold text-white tracking-tight">Coaching Dashboard</h2>
+            <p className="text-slate-400 mt-1">Strategic overview for <span className="text-brand-accent font-semibold">{client.displayName}</span></p>
           </div>
         </div>
         <div className="flex gap-3">
           <button 
+            onClick={() => setShowReflectionBuilder(true)}
+            className="flex items-center gap-2 bg-brand-surface text-white px-4 py-2 rounded-xl hover:bg-slate-800 transition-colors border border-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-accent"
+          >
+            <Brain className="w-4 h-4" /> Reflection Template
+          </button>
+          <button 
             onClick={() => setShowHabitModal(true)}
-            className="flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-xl hover:bg-slate-700 transition-colors"
+            className="flex items-center gap-2 bg-brand-surface text-white px-4 py-2 rounded-xl hover:bg-slate-800 transition-colors border border-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-accent"
           >
             <Plus className="w-4 h-4" /> New Habit
           </button>
           <button 
             onClick={() => setShowMetricModal(true)}
-            className="flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-xl hover:bg-slate-700 transition-colors"
+            className="flex items-center gap-2 bg-brand-surface text-white px-4 py-2 rounded-xl hover:bg-slate-800 transition-colors border border-slate-700 focus:outline-none focus:ring-2 focus:ring-brand-accent"
           >
             <Plus className="w-4 h-4" /> New Metric
           </button>
           <button 
             onClick={() => setShowGoalModal(true)}
-            className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-500 transition-colors shadow-lg shadow-emerald-600/20"
+            className="flex items-center gap-2 bg-brand-accent text-white px-4 py-2 rounded-xl hover:bg-brand-secondary transition-colors shadow-lg shadow-brand-accent/20 focus:outline-none focus:ring-2 focus:ring-brand-accent"
           >
             <Plus className="w-4 h-4" /> New Goal
           </button>
@@ -543,21 +632,103 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
 
       {/* Habit Tracker Section */}
       <section className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Session Reflection Card */}
+          <div className="bg-brand-surface border border-slate-800/50 p-6 rounded-2xl shadow-xl flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-brand-accent/10 rounded-xl flex items-center justify-center text-brand-accent">
+                    <Brain className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-white">Session Reflection</h4>
+                    <p className="text-xs text-slate-500">Post-session processing tool</p>
+                  </div>
+                </div>
+                <Badge variant={reflectionTemplate?.isEnabled ? 'success' : 'default'}>
+                  {reflectionTemplate?.isEnabled ? 'Enabled' : 'Disabled'}
+                </Badge>
+              </div>
+              <div className="space-y-2 mb-6">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Last Reflection</span>
+                  <span className="text-white font-medium">
+                    {lastReflection ? format(parseISO(lastReflection.sessionDate), 'MMM d, yyyy') : 'Never'}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Total Entries</span>
+                  <span className="text-white font-medium">{reflections.length}</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowReflectionHistory(true)}
+                className="flex-1 py-2.5 bg-slate-800 text-slate-300 rounded-xl text-sm font-bold hover:bg-slate-700 transition-all"
+              >
+                View History
+              </button>
+              <button 
+                onClick={() => setShowReflectionBuilder(true)}
+                className="flex-1 py-2.5 bg-brand-accent/10 text-brand-accent border border-brand-accent/20 rounded-xl text-sm font-bold hover:bg-brand-accent/20 transition-all"
+              >
+                Edit Template
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Stats / Info Card */}
+          <div className="bg-brand-surface border border-slate-800/50 p-6 rounded-2xl shadow-xl">
+            <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-4">Strategic Summary</h4>
+            <div className="space-y-4">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-emerald-500/10 rounded-lg flex items-center justify-center text-emerald-500">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Active Goals</p>
+                  <p className="text-lg font-bold text-white">{goals.filter(g => g.status === 'active').length}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-blue-500/10 rounded-lg flex items-center justify-center text-blue-500">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Current Habits</p>
+                  <p className="text-lg font-bold text-white">{habits.length}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Habit Tracker Section */}
+      <section className="space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-emerald-500" /> Habit Consistency
+          <h3 className="text-lg font-bold text-white flex items-center gap-2 tracking-tight">
+            <ShieldCheck className="w-5 h-5 text-brand-accent" /> Habit Consistency
           </h3>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {habits.length > 0 ? habits.map(habit => (
-            <div key={habit.id} className="bg-slate-900 border border-slate-800 p-5 rounded-2xl group relative">
+            <div key={habit.id} className="bg-brand-surface border border-slate-800/50 p-5 rounded-2xl group relative shadow-xl">
               <button 
-                onClick={async () => {
-                  if (confirm('Delete this habit?')) {
-                    await deleteDoc(doc(db, 'habits', habit.id));
-                  }
+                onClick={() => {
+                  setDeleteConfirm({
+                    id: habit.id,
+                    type: 'habit',
+                    name: habit.name,
+                    onConfirm: async () => {
+                      await deleteDoc(doc(db, 'habits', habit.id));
+                    }
+                  });
                 }}
-                className="absolute top-4 right-4 p-1 text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
+                className="absolute top-4 right-4 p-1 text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-rose-500 rounded"
+                aria-label={`Delete ${habit.name}`}
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -567,10 +738,10 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
                   <div className="flex items-center gap-2 mt-1">
                     <p className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">{habit.frequency || 'Daily'}</p>
                     <span className="w-1 h-1 bg-slate-700 rounded-full" />
-                    <p className="text-[10px] text-emerald-500 uppercase tracking-wider font-bold">{habit.reportingType}</p>
+                    <p className="text-[10px] text-brand-accent uppercase tracking-wider font-bold">{habit.reportingType}</p>
                   </div>
                 </div>
-                <div className="bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full text-xs font-bold">
+                <div className="bg-brand-accent/10 text-brand-accent px-3 py-1 rounded-full text-xs font-bold">
                   {habit.streak} Day Streak
                 </div>
               </div>
@@ -580,7 +751,7 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
                     key={i} 
                     className={cn(
                       "flex-1 h-2 rounded-full",
-                      i < (habit.streak % 7 || (habit.streak > 0 ? 7 : 0)) ? "bg-emerald-500" : "bg-slate-800"
+                      i < (habit.streak % 7 || (habit.streak > 0 ? 7 : 0)) ? "bg-brand-accent" : "bg-slate-800"
                     )}
                   />
                 ))}
@@ -592,7 +763,7 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
               )}
             </div>
           )) : (
-            <div className="col-span-full py-10 bg-slate-900/50 border border-dashed border-slate-800 rounded-2xl text-center">
+            <div className="col-span-full py-10 bg-brand-surface/50 border border-dashed border-slate-800 rounded-2xl text-center">
               <p className="text-slate-500 text-sm">No habits currently being tracked for this client.</p>
             </div>
           )}
@@ -601,19 +772,25 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
 
       {/* Subjective Metrics Section */}
       <section className="space-y-4">
-        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-          <Activity className="w-5 h-5 text-emerald-500" /> Subjective Metrics
+        <h3 className="text-lg font-bold text-white flex items-center gap-2 tracking-tight">
+          <Activity className="w-5 h-5 text-brand-accent" /> Subjective Metrics
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {metrics.length > 0 ? metrics.map(metric => (
-            <div key={metric.id} className="bg-slate-900 border border-slate-800 p-5 rounded-2xl group relative">
+            <div key={metric.id} className="bg-brand-surface border border-slate-800/50 p-5 rounded-2xl group relative shadow-xl">
               <button 
-                onClick={async () => {
-                  if (confirm('Delete this metric?')) {
-                    await deleteDoc(doc(db, 'subjective_metrics', metric.id));
-                  }
+                onClick={() => {
+                  setDeleteConfirm({
+                    id: metric.id,
+                    type: 'metric',
+                    name: metric.name,
+                    onConfirm: async () => {
+                      await deleteDoc(doc(db, 'subjective_metrics', metric.id));
+                    }
+                  });
                 }}
-                className="absolute top-4 right-4 p-1 text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
+                className="absolute top-4 right-4 p-1 text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-rose-500 rounded"
+                aria-label={`Delete ${metric.name}`}
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -628,15 +805,15 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
                   <span>{metric.lowAnchor}</span>
                   <span>{metric.highAnchor}</span>
                 </div>
-                <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden flex">
+                <div className="h-1.5 bg-brand-focus rounded-full overflow-hidden flex">
                   {[...Array(metric.scaleMax)].map((_, i) => (
-                    <div key={i} className="flex-1 border-r border-slate-900 last:border-0" />
+                    <div key={i} className="flex-1 border-r border-[#0b1121] last:border-0" />
                   ))}
                 </div>
               </div>
             </div>
           )) : (
-            <div className="col-span-full py-10 bg-slate-900/50 border border-dashed border-slate-800 rounded-2xl text-center">
+            <div className="col-span-full py-10 bg-brand-surface/50 border border-dashed border-slate-800 rounded-2xl text-center">
               <p className="text-slate-500 text-sm">No subjective metrics set for this client.</p>
             </div>
           )}
@@ -645,16 +822,16 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
 
       {/* Long Term Goals Section */}
       <section className="space-y-4">
-        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-          <ArrowRight className="w-5 h-5 text-emerald-500" /> Long-Term Goals & Progress
+        <h3 className="text-lg font-bold text-white flex items-center gap-2 tracking-tight">
+          <ArrowRight className="w-5 h-5 text-brand-accent" /> Long-Term Goals & Progress
         </h3>
         <div className="grid grid-cols-1 gap-4">
           {goals.length > 0 ? goals.map(goal => (
-            <div key={goal.id} className="bg-slate-900 border border-slate-800 p-6 rounded-2xl group hover:border-emerald-500/30 transition-all">
+            <div key={goal.id} className="bg-brand-surface border border-slate-800/50 p-6 rounded-2xl group hover:border-brand-accent/30 transition-all shadow-xl">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-1">
-                    <h4 className="text-xl font-bold text-white">{goal.title}</h4>
+                    <h4 className="text-xl font-bold text-white tracking-tight">{goal.title}</h4>
                     <Badge variant={goal.status === 'completed' ? 'success' : 'default'}>
                       {goal.status}
                     </Badge>
@@ -670,13 +847,13 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
               <div className="space-y-3">
                 <div className="flex justify-between items-end">
                   <p className="text-sm font-bold text-slate-300">Progress</p>
-                  <p className="text-2xl font-black text-emerald-500">{goal.progress}%</p>
+                  <p className="text-2xl font-black text-brand-accent">{goal.progress}%</p>
                 </div>
-                <div className="relative h-4 bg-slate-800 rounded-full overflow-hidden">
+                <div className="relative h-4 bg-brand-focus rounded-full overflow-hidden">
                   <motion.div 
                     initial={{ width: 0 }}
                     animate={{ width: `${goal.progress}%` }}
-                    className="absolute inset-y-0 left-0 bg-gradient-to-r from-emerald-600 to-emerald-400 rounded-full"
+                    className="absolute inset-y-0 left-0 bg-gradient-to-r from-brand-accent to-brand-secondary rounded-full"
                   />
                 </div>
                 <div className="flex gap-2 pt-2">
@@ -685,10 +862,10 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
                       key={val}
                       onClick={() => updateGoalProgress(goal.id, val)}
                       className={cn(
-                        "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all",
+                        "px-3 py-1 rounded-lg text-[10px] font-bold uppercase transition-all focus:outline-none focus:ring-2 focus:ring-brand-accent",
                         goal.progress === val 
-                          ? "bg-emerald-600 text-white" 
-                          : "bg-slate-800 text-slate-500 hover:text-white hover:bg-slate-700"
+                          ? "bg-brand-accent text-white" 
+                          : "bg-brand-focus text-slate-500 hover:text-white hover:bg-slate-700"
                       )}
                     >
                       {val}%
@@ -696,10 +873,15 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
                   ))}
                   <div className="flex-1" />
                   <button 
-                    onClick={async () => {
-                      if (confirm('Are you sure you want to delete this goal?')) {
-                        await deleteDoc(doc(db, 'goals', goal.id));
-                      }
+                    onClick={() => {
+                      setDeleteConfirm({
+                        id: goal.id,
+                        type: 'goal',
+                        name: goal.title,
+                        onConfirm: async () => {
+                          await deleteDoc(doc(db, 'goals', goal.id));
+                        }
+                      });
                     }}
                     className="p-1 text-slate-600 hover:text-rose-500 transition-colors"
                   >
@@ -716,6 +898,106 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
           )}
         </div>
       </section>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {showReflectionBuilder && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowReflectionBuilder(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <ReflectionTemplateBuilder 
+                clientUid={client.uid}
+                coachUid={auth.currentUser?.uid || ''}
+                template={reflectionTemplate}
+                onSave={handleSaveTemplate}
+              />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showReflectionHistory && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowReflectionHistory(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
+            >
+              <ReflectionResponseViewer reflections={reflections} />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deleteConfirm && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeleteConfirm(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">Delete {deleteConfirm.type}?</h3>
+              <p className="text-slate-400 mb-8">
+                Are you sure you want to delete "<span className="text-white font-semibold">{deleteConfirm.name}</span>"? This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setDeleteConfirm(null)}
+                  className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-medium hover:bg-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={async () => {
+                    try {
+                      await deleteConfirm.onConfirm();
+                      setDeleteConfirm(null);
+                    } catch (error) {
+                      handleFirestoreError(error, OperationType.DELETE, `${deleteConfirm.type}s/${deleteConfirm.id}`);
+                    }
+                  }}
+                  className="flex-1 py-3 bg-rose-600 text-white rounded-xl font-medium hover:bg-rose-500 shadow-lg shadow-rose-600/20 transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Goal Modal */}
       <AnimatePresence>
@@ -1073,13 +1355,13 @@ const MessagingView = ({
             <div className="px-4 pb-2 border-b border-slate-800 mb-2">
               <button 
                 onClick={() => setShowInactiveInChat(!showInactiveInChat)}
-                className="text-[10px] uppercase tracking-wider font-bold text-slate-500 hover:text-emerald-500 transition-colors flex items-center gap-1"
+                className="text-[10px] uppercase tracking-wider font-bold text-slate-500 hover:text-brand-accent transition-colors flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-brand-accent rounded"
               >
                 {showInactiveInChat ? 'Hide Inactive' : `Show Inactive (${inactiveClients.length})`}
               </button>
             </div>
           )}
-          <div className="space-y-2 overflow-y-auto flex-1 pr-2 scrollbar-thin scrollbar-thumb-slate-800">
+          <div className="space-y-2 overflow-y-auto flex-1 pr-2 no-scrollbar">
             {visibleClients.length === 0 ? (
               <div className="text-center py-8 text-slate-500 text-sm">
                 No {showInactiveInChat ? '' : 'active'} clients found.
@@ -1092,20 +1374,20 @@ const MessagingView = ({
                     key={client.uid}
                     onClick={() => setSelectedClient(client.uid)}
                     className={cn(
-                      "w-full flex items-center justify-between p-3 rounded-xl transition-all border",
+                      "w-full flex items-center justify-between p-3 rounded-xl transition-all border focus:outline-none focus:ring-2 focus:ring-brand-accent",
                       selectedClient === client.uid 
-                        ? "bg-emerald-600/10 border-emerald-500/50 text-white" 
-                        : "bg-slate-800/30 border-slate-700/30 text-slate-400 hover:bg-slate-800/50"
+                        ? "bg-brand-accent/10 border-brand-accent/50 text-white" 
+                        : "bg-brand-surface border-slate-700/30 text-slate-400 hover:bg-slate-800/50"
                     )}
                   >
                     <div className="flex items-center gap-3 overflow-hidden">
-                      <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-brand-accent/20 flex items-center justify-center text-brand-accent font-bold shrink-0">
                         {client.displayName[0]}
                       </div>
                       <span className="text-sm font-medium truncate">{client.displayName}</span>
                     </div>
                     {unreadCount > 0 && (
-                      <span className="bg-emerald-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                      <span className="bg-brand-accent text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
                         {unreadCount}
                       </span>
                     )}
@@ -1130,7 +1412,7 @@ const MessagingView = ({
           <div className="flex flex-col h-full">
             <div 
               ref={scrollRef}
-              className="flex-1 overflow-y-auto space-y-4 mb-4 pr-2 scrollbar-thin scrollbar-thumb-slate-700"
+              className="flex-1 overflow-y-auto space-y-4 mb-4 pr-2 no-scrollbar"
             >
               {filteredMessages.length === 0 ? (
                 <div className="text-center py-12 text-slate-600 italic text-sm">
@@ -1150,8 +1432,8 @@ const MessagingView = ({
                       <div className={cn(
                         "max-w-[80%] p-4 rounded-2xl text-sm shadow-sm",
                         isMe 
-                          ? "bg-emerald-600 text-white rounded-tr-none" 
-                          : "bg-slate-800 text-slate-200 rounded-tl-none border border-slate-700"
+                          ? "bg-brand-accent text-white rounded-tr-none" 
+                          : "bg-brand-surface text-slate-200 rounded-tl-none border border-slate-700"
                       )}>
                         {msg.type === 'system' && (
                           <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/10 text-[10px] font-bold uppercase tracking-wider opacity-80">
@@ -1165,8 +1447,8 @@ const MessagingView = ({
                             target="_blank" 
                             rel="noopener noreferrer"
                             className={cn(
-                              "mt-3 flex items-center gap-2 p-2 rounded-lg text-xs font-medium transition-all",
-                              isMe ? "bg-white/10 hover:bg-white/20" : "bg-slate-900/50 hover:bg-slate-900"
+                              "mt-3 flex items-center gap-2 p-2 rounded-lg text-xs font-medium transition-all focus:outline-none focus:ring-2 focus:ring-white",
+                              isMe ? "bg-white/10 hover:bg-white/20" : "bg-brand-focus hover:bg-slate-900"
                             )}
                           >
                             <FileText className="w-4 h-4" />
@@ -1189,18 +1471,19 @@ const MessagingView = ({
               )}
             </div>
 
-            <form onSubmit={handleSend} className="flex gap-2 pt-4 border-t border-slate-800">
+            <form onSubmit={handleSend} className="flex gap-2 pt-4 border-t border-slate-800/50">
               <input 
                 type="text" 
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 placeholder="Type your message..."
-                className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="flex-1 bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
               />
               <button 
                 type="submit"
                 disabled={!newMessage.trim()}
-                className="bg-emerald-600 text-white p-3 rounded-xl hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+                className="bg-brand-accent text-white p-3 rounded-xl hover:bg-brand-secondary transition-all shadow-lg shadow-brand-accent/20 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-accent"
+                aria-label="Send message"
               >
                 <Plus className="w-6 h-6 rotate-45" />
               </button>
@@ -1325,7 +1608,11 @@ export default function App() {
   const [coachProfile, setCoachProfile] = useState<UserProfile | null>(null);
   const [clientHabits, setClientHabits] = useState<Habit[]>([]);
   const [clientMetrics, setClientMetrics] = useState<SubjectiveMetric[]>([]);
+  const [clientReflectionTemplate, setClientReflectionTemplate] = useState<ReflectionTemplate | null>(null);
+  const [clientReflections, setClientReflections] = useState<Reflection[]>([]);
   const [habitsLoading, setHabitsLoading] = useState(false);
+
+  const [selectedReflectionAppointment, setSelectedReflectionAppointment] = useState<Appointment | null>(null);
 
   useEffect(() => {
     let unsubProfile: (() => void) | null = null;
@@ -1401,9 +1688,35 @@ export default function App() {
       setClientMetrics(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as SubjectiveMetric)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'subjective_metrics'));
 
+    const templateQuery = query(
+      collection(db, 'reflection_templates'),
+      where('clientUid', '==', user.uid),
+      limit(1)
+    );
+
+    const unsubTemplate = onSnapshot(templateQuery, (snapshot) => {
+      if (!snapshot.empty) {
+        setClientReflectionTemplate({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as ReflectionTemplate);
+      } else {
+        setClientReflectionTemplate(null);
+      }
+    });
+
+    const reflectionsQuery = query(
+      collection(db, 'reflections'),
+      where('clientUid', '==', user.uid),
+      orderBy('sessionDate', 'desc')
+    );
+
+    const unsubReflections = onSnapshot(reflectionsQuery, (snapshot) => {
+      setClientReflections(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Reflection)));
+    });
+
     return () => {
       unsubHabits();
       unsubMetrics();
+      unsubTemplate();
+      unsubReflections();
     };
   }, [user, profile]);
 
@@ -1737,11 +2050,43 @@ export default function App() {
     }
   }, []);
 
+  // Session Reflection Trigger Logic
+  useEffect(() => {
+    if (profile?.role !== 'client' || !clientReflectionTemplate?.isEnabled) return;
+
+    const checkReflections = async () => {
+      const now = new Date();
+      const thirtyMinsAgo = addHours(now, -0.5);
+      const sixtyMinsAgo = addHours(now, -1);
+
+      const recentAppts = appointments.filter((a: any) => {
+        const end = safeToDate(a.endTime);
+        return isBefore(end, thirtyMinsAgo) && isAfter(end, sixtyMinsAgo) && a.status === 'completed';
+      });
+
+      for (const appt of recentAppts) {
+        const hasReflection = clientReflections.some(r => r.appointmentId === appt.id);
+        if (!hasReflection) {
+          if (notificationPermission === 'granted') {
+            new Notification('Session Reflection', {
+              body: `How did your session go? Take a moment to reflect on your progress.`,
+              icon: '/logo.png'
+            });
+          }
+        }
+      }
+    };
+
+    const interval = setInterval(checkReflections, 60000);
+    checkReflections();
+    return () => clearInterval(interval);
+  }, [appointments, clientReflections, clientReflectionTemplate, profile, notificationPermission]);
+
   if (loading || (user && !profile)) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="min-h-screen bg-brand-focus flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin" />
+          <div className="w-12 h-12 border-4 border-brand-accent/20 border-t-brand-accent rounded-full animate-spin" />
           <p className="text-slate-400 font-medium animate-pulse">Loading portal...</p>
         </div>
       </div>
@@ -1750,11 +2095,11 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-brand-focus flex items-center justify-center p-4">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl"
+          className="max-w-md w-full bg-brand-surface border border-slate-800/50 rounded-3xl p-8 shadow-2xl"
         >
           <div className="flex flex-col items-center text-center">
             <div className="w-16 h-16 mb-6">
@@ -1763,12 +2108,12 @@ export default function App() {
                 alt="MrLeeTeaches Logo" 
                 className="w-full h-full object-contain rounded-2xl"
                 onError={(e) => {
-                  e.currentTarget.src = 'https://picsum.photos/seed/mrleeteaches/200';
+                  e.currentTarget.src = 'https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png';
                 }}
               />
             </div>
-            <h1 className="text-3xl font-bold text-white mb-1">MrLeeTeaches</h1>
-            <p className="text-emerald-500 font-medium text-sm mb-4">Neurodiversity Coaching</p>
+            <h1 className="text-3xl font-bold text-white mb-1 tracking-tight">MrLeeTeaches</h1>
+            <p className="text-brand-accent font-medium text-sm mb-4">Neurodiversity Coaching</p>
             <p className="text-slate-400 mb-8">
               {authMode === 'login' && 'Welcome back! Please sign in to your account.'}
               {authMode === 'signup' && 'Join the coaching portal to get started.'}
@@ -1782,7 +2127,7 @@ export default function App() {
             )}
 
             {authMessage && (
-              <div className="w-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm p-3 rounded-xl mb-6">
+              <div className="w-full bg-brand-accent/10 border border-brand-accent/20 text-brand-accent text-sm p-3 rounded-xl mb-6">
                 {authMessage}
               </div>
             )}
@@ -1795,7 +2140,7 @@ export default function App() {
                   required
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
                 />
               )}
               <input
@@ -1804,7 +2149,7 @@ export default function App() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
               />
               {authMode !== 'forgot' && (
                 <input
@@ -1813,12 +2158,12 @@ export default function App() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
                 />
               )}
               <button
                 type="submit"
-                className="w-full bg-emerald-600 text-white font-semibold py-3 rounded-xl hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/20"
+                className="w-full bg-brand-accent text-white font-semibold py-3 rounded-xl hover:bg-brand-secondary transition-all shadow-lg shadow-brand-accent/20 focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 focus:ring-offset-brand-surface"
               >
                 {authMode === 'login' && 'Sign In'}
                 {authMode === 'signup' && 'Create Account'}
@@ -1836,7 +2181,7 @@ export default function App() {
 
                 <button
                   onClick={handleGoogleLogin}
-                  className="w-full flex items-center justify-center gap-3 bg-white text-slate-900 font-semibold py-3 rounded-xl hover:bg-slate-100 transition-all duration-200 shadow-lg shadow-white/5"
+                  className="w-full flex items-center justify-center gap-3 bg-white text-slate-900 font-semibold py-3 rounded-xl hover:bg-slate-100 transition-all duration-200 shadow-lg shadow-white/5 focus:outline-none focus:ring-2 focus:ring-brand-accent"
                 >
                   <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
                   Continue with Google
@@ -1847,28 +2192,28 @@ export default function App() {
             <div className="mt-8 flex flex-col gap-2">
               {authMode === 'login' ? (
                 <>
-                  <button onClick={() => setAuthMode('signup')} className="text-sm text-emerald-500 hover:underline">
+                  <button onClick={() => setAuthMode('signup')} className="text-sm text-brand-accent hover:underline focus:outline-none focus:ring-2 focus:ring-brand-accent rounded">
                     Don't have an account? Sign up
                   </button>
-                  <button onClick={() => setAuthMode('forgot')} className="text-sm text-slate-500 hover:underline">
+                  <button onClick={() => setAuthMode('forgot')} className="text-sm text-slate-500 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-accent rounded">
                     Forgot password?
                   </button>
                 </>
               ) : (
-                <button onClick={() => setAuthMode('login')} className="text-sm text-emerald-500 hover:underline">
+                <button onClick={() => setAuthMode('login')} className="text-sm text-brand-accent hover:underline focus:outline-none focus:ring-2 focus:ring-brand-accent rounded">
                   Back to login
                 </button>
               )}
             </div>
             
-            <p className="mt-8 text-[10px] text-slate-600 uppercase tracking-widest">
+            <p className="mt-8 text-[10px] text-slate-600 uppercase tracking-widest font-bold">
               MrLeeTeaches Coaching Portal
             </p>
             <a 
               href="https://mrleeteaches.com/privacypolicy/" 
               target="_blank" 
               rel="noopener noreferrer"
-              className="mt-4 text-[10px] text-slate-500 hover:text-emerald-500 transition-colors"
+              className="mt-4 text-[10px] text-slate-500 hover:text-brand-accent transition-colors focus:outline-none focus:ring-2 focus:ring-brand-accent rounded"
             >
               Privacy Policy
             </a>
@@ -1883,6 +2228,33 @@ export default function App() {
       setProfile(prev => prev ? { ...prev, isOnboarded: true } : null);
     }} />;
   }
+
+  const handleSaveReflection = async (responses: Record<string, string>, status: 'draft' | 'submitted') => {
+    if (!user || !selectedReflectionAppointment) return;
+    try {
+      const existing = clientReflections.find(r => r.appointmentId === selectedReflectionAppointment.id);
+      const reflectionRef = existing 
+        ? doc(db, 'reflections', existing.id)
+        : doc(collection(db, 'reflections'));
+      
+      await setDoc(reflectionRef, {
+        clientUid: user.uid,
+        appointmentId: selectedReflectionAppointment.id,
+        sessionDate: format(safeToDate(selectedReflectionAppointment.startTime), 'yyyy-MM-dd'),
+        responses,
+        status,
+        updatedAt: serverTimestamp(),
+        createdAt: existing ? existing.createdAt : serverTimestamp()
+      }, { merge: true });
+
+      if (status === 'submitted') {
+        setActiveTab('dashboard');
+        setSelectedReflectionAppointment(null);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'reflections');
+    }
+  };
 
   const renderContent = () => {
     switch (activeTab) {
@@ -1904,8 +2276,14 @@ export default function App() {
           onOpenCheckIn={() => setShowCheckInModal(true)}
           habits={clientHabits}
           metrics={clientMetrics}
+          reflectionTemplate={clientReflectionTemplate}
+          reflections={clientReflections}
           notificationPermission={notificationPermission}
           onRequestNotifications={requestNotificationPermission}
+          onOpenReflection={(appt: Appointment) => {
+            setSelectedReflectionAppointment(appt);
+            setActiveTab('reflection');
+          }}
         />
       );
       case 'calendar': return (
@@ -1952,6 +2330,27 @@ export default function App() {
       case 'library': return <LibraryView clients={clients} user={user} />;
       case 'tools': return <ToolsLibraryView />;
       case 'documents': return <DocumentsView documents={documents} role={profile?.role} user={user} />;
+      case 'reflection': return (
+        clientReflectionTemplate && selectedReflectionAppointment ? (
+          <ReflectionEntryView 
+            template={clientReflectionTemplate}
+            appointment={selectedReflectionAppointment}
+            existingReflection={clientReflections.find(r => r.appointmentId === selectedReflectionAppointment.id) || null}
+            onSave={handleSaveReflection}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-500">
+            <Brain className="w-12 h-12 mb-4 opacity-20" />
+            <p>No reflection template found or session selected.</p>
+            <button 
+              onClick={() => setActiveTab('dashboard')}
+              className="mt-4 text-brand-accent font-bold hover:underline"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        )
+      );
       case 'reminders': return (
         <RemindersView 
           appointments={appointments} 
@@ -1973,12 +2372,19 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 flex">
+    <div className="min-h-screen bg-brand-focus text-slate-200 flex">
+      <a 
+        href="#main-content" 
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 bg-brand-accent text-white p-3 rounded-lg z-[150] font-bold outline-none ring-2 ring-white"
+      >
+        Skip to main content
+      </a>
+
       {/* Sidebar - Desktop */}
-      <aside className="hidden lg:flex flex-col w-72 bg-slate-900 border-r border-slate-800 p-6">
+      <aside className="hidden lg:flex flex-col w-72 bg-[#0b1121] border-r border-slate-800/50 p-6">
         <button 
           onClick={() => setActiveTab('dashboard')}
-          className="flex items-center gap-3 mb-10 px-2 hover:opacity-80 transition-opacity text-left"
+          className="flex items-center gap-3 mb-10 px-2 hover:opacity-80 transition-opacity text-left focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-xl"
         >
           <div className="w-10 h-10">
             <img 
@@ -1986,19 +2392,28 @@ export default function App() {
               alt="Logo" 
               className="w-full h-full object-contain rounded-xl"
               onError={(e) => {
-                e.currentTarget.src = 'https://picsum.photos/seed/mrleeteaches/200';
+                e.currentTarget.src = 'https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png';
               }}
             />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-white tracking-tight">MrLeeTeaches</h1>
-            <p className="text-emerald-500 text-[10px] font-bold uppercase tracking-wider -mt-1">Neurodiversity Coaching</p>
+            <h1 className="text-xl font-bold text-white tracking-tight leading-none">MrLeeTeaches</h1>
+            <p className="text-brand-accent text-[10px] font-bold uppercase tracking-wider mt-1">Neurodiversity Coaching</p>
           </div>
         </button>
 
         <nav className="flex-1 space-y-2">
           <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
           <SidebarItem icon={Calendar} label="Calendar" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
+          {profile?.role === 'client' && clientReflectionTemplate?.isEnabled && (
+            <SidebarItem 
+              icon={Brain} 
+              label="Session Reflection" 
+              active={activeTab === 'reflection'} 
+              onClick={() => setActiveTab('reflection')} 
+              badge={clientReflections.some(r => r.status === 'draft') ? 1 : undefined}
+            />
+          )}
           <SidebarItem icon={Wrench} label="Tools Library" active={activeTab === 'tools'} onClick={() => setActiveTab('tools')} />
           {profile?.role === 'coach' && (
             <>
@@ -2018,9 +2433,9 @@ export default function App() {
           <SidebarItem icon={Settings} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
         </nav>
 
-        <div className="mt-auto pt-6 border-t border-slate-800">
+        <div className="mt-auto pt-6 border-t border-slate-800/50">
           <div className="flex items-center gap-3 px-2 mb-6">
-            <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-emerald-500 font-bold overflow-hidden">
+            <div className="w-10 h-10 rounded-full bg-brand-surface flex items-center justify-center text-brand-accent font-bold overflow-hidden border border-slate-700">
               {profile?.photoURL ? (
                 <img src={profile.photoURL} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
@@ -2034,7 +2449,7 @@ export default function App() {
           </div>
           <button 
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-rose-400 hover:bg-rose-400/5 rounded-xl transition-all duration-200"
+            className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-rose-400 hover:bg-rose-400/5 rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-rose-400"
           >
             <LogOut className="w-5 h-5" />
             <span className="font-medium">Sign Out</span>
@@ -2043,25 +2458,29 @@ export default function App() {
       </aside>
 
       {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-4 z-50">
+      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-[#0b1121] border-b border-slate-800/50 flex items-center justify-between px-4 z-50">
         <button 
           onClick={() => setActiveTab('dashboard')}
-          className="flex items-center gap-2 hover:opacity-80 transition-opacity text-left"
+          className="flex items-center gap-2 hover:opacity-80 transition-opacity text-left focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-lg"
         >
           <img 
             src="/logo.png" 
             alt="Logo" 
             className="w-8 h-8 object-contain rounded-lg"
             onError={(e) => {
-              e.currentTarget.src = 'https://picsum.photos/seed/mrleeteaches/200';
+              e.currentTarget.src = 'https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png';
             }}
           />
           <div>
             <span className="font-bold text-white block leading-none">MrLeeTeaches</span>
-            <span className="text-emerald-500 text-[8px] font-bold uppercase tracking-wider">Neurodiversity Coaching</span>
+            <span className="text-brand-accent text-[8px] font-bold uppercase tracking-wider">Neurodiversity Coaching</span>
           </div>
         </button>
-        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 text-slate-400 hover:text-white">
+        <button 
+          onClick={() => setSidebarOpen(!sidebarOpen)} 
+          aria-label="Toggle menu"
+          className="p-2 text-slate-400 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-lg"
+        >
           {sidebarOpen ? <X /> : <Menu />}
         </button>
       </div>
@@ -2082,33 +2501,42 @@ export default function App() {
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed inset-y-0 left-0 w-72 bg-slate-900 z-50 p-6 lg:hidden"
+              className="fixed inset-y-0 left-0 w-72 bg-[#0b1121] z-50 p-6 lg:hidden border-r border-slate-800/50"
             >
               <div className="flex items-center justify-between mb-10">
                 <button 
                   onClick={() => { setActiveTab('dashboard'); setSidebarOpen(false); }}
-                  className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left"
+                  className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-xl"
                 >
                   <img 
                     src="/logo.png" 
                     alt="Logo" 
                     className="w-10 h-10 object-contain rounded-xl"
                     onError={(e) => {
-                      e.currentTarget.src = 'https://picsum.photos/seed/mrleeteaches/200';
+                      e.currentTarget.src = 'https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png';
                     }}
                   />
                   <div>
-                    <h1 className="text-xl font-bold text-white tracking-tight">MrLeeTeaches</h1>
-                    <p className="text-emerald-500 text-[10px] font-bold uppercase tracking-wider -mt-1">Neurodiversity Coaching</p>
+                    <h1 className="text-xl font-bold text-white tracking-tight leading-none">MrLeeTeaches</h1>
+                    <p className="text-brand-accent text-[10px] font-bold uppercase tracking-wider mt-1">Neurodiversity Coaching</p>
                   </div>
                 </button>
-                <button onClick={() => setSidebarOpen(false)} className="p-2 text-slate-400">
+                <button onClick={() => setSidebarOpen(false)} className="p-2 text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-lg">
                   <X />
                 </button>
               </div>
               <nav className="space-y-2">
                 <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setSidebarOpen(false); }} />
                 <SidebarItem icon={Calendar} label="Calendar" active={activeTab === 'calendar'} onClick={() => { setActiveTab('calendar'); setSidebarOpen(false); }} />
+                {profile?.role === 'client' && clientReflectionTemplate?.isEnabled && (
+                  <SidebarItem 
+                    icon={Brain} 
+                    label="Session Reflection" 
+                    active={activeTab === 'reflection'} 
+                    onClick={() => { setActiveTab('reflection'); setSidebarOpen(false); }} 
+                    badge={clientReflections.some(r => r.status === 'draft') ? 1 : undefined}
+                  />
+                )}
                 <SidebarItem icon={Wrench} label="Tools Library" active={activeTab === 'tools'} onClick={() => { setActiveTab('tools'); setSidebarOpen(false); }} />
                 {profile?.role === 'coach' && (
                   <>
@@ -2139,7 +2567,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Main Content */}
-      <main className="flex-1 lg:p-8 p-4 pt-20 lg:pt-8 overflow-y-auto">
+      <main id="main-content" className="flex-1 lg:p-8 p-4 pt-20 lg:pt-8 overflow-y-auto outline-none">
         <div className="max-w-7xl mx-auto">
           {showPasswordChange && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
@@ -2426,7 +2854,7 @@ export default function App() {
               <div className="mt-12 pt-8 border-t border-slate-800 flex justify-center">
                 <button 
                   onClick={() => setShowCheckInModal(false)}
-                  className="px-12 py-4 bg-emerald-600 text-white rounded-2xl font-bold text-lg hover:bg-emerald-500 transition-all shadow-xl shadow-emerald-600/20"
+                  className="px-12 py-4 bg-brand-accent text-white rounded-2xl font-bold text-lg hover:bg-brand-secondary transition-all shadow-xl shadow-brand-accent/20 focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 focus:ring-offset-slate-950"
                 >
                   Done for Today
                 </button>
@@ -2506,12 +2934,12 @@ function HabitTrackerView({ user }: { user: User }) {
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <h4 className="font-bold text-white">{habit.name}</h4>
-                  {isCompletedToday && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                  {isCompletedToday && <CheckCircle2 className="w-4 h-4 text-brand-accent" />}
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <p className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">{habit.frequency || 'Daily'}</p>
                   <span className="w-1 h-1 bg-slate-700 rounded-full" />
-                  <p className="text-[10px] text-emerald-500 font-bold">{habit.streak} Day Streak</p>
+                  <p className="text-[10px] text-brand-accent font-bold">{habit.streak} Day Streak</p>
                 </div>
               </div>
 
@@ -2521,10 +2949,10 @@ function HabitTrackerView({ user }: { user: User }) {
                     disabled={submitting === habit.id || isCompletedToday}
                     onClick={() => handleReport(habit, true)}
                     className={cn(
-                      "px-6 py-2 rounded-xl font-bold transition-all",
+                      "px-6 py-2 rounded-xl font-bold transition-all focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 focus:ring-offset-brand-surface",
                       isCompletedToday 
-                        ? "bg-emerald-600/20 text-emerald-500 border border-emerald-500/20" 
-                        : "bg-emerald-600 text-white hover:bg-emerald-500 shadow-lg shadow-emerald-600/20"
+                        ? "bg-brand-accent/20 text-brand-accent border border-brand-accent/20" 
+                        : "bg-brand-accent text-white hover:bg-brand-secondary shadow-lg shadow-brand-accent/20"
                     )}
                   >
                     {submitting === habit.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : isCompletedToday ? 'Completed' : 'Mark Done'}
@@ -2538,7 +2966,7 @@ function HabitTrackerView({ user }: { user: User }) {
                         placeholder={habit.targetValue?.toString() || "0"}
                         value={isCompletedToday ? habit.history?.[today] : (inputValue[habit.id] || '')}
                         onChange={e => setInputValue({ ...inputValue, [habit.id]: e.target.value })}
-                        className="w-24 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:ring-2 focus:ring-emerald-500"
+                        className="w-24 bg-brand-focus border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:ring-2 focus:ring-brand-accent focus:outline-none"
                       />
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-500 uppercase">
                         {habit.reportingType}
@@ -2548,7 +2976,7 @@ function HabitTrackerView({ user }: { user: User }) {
                       <button
                         disabled={submitting === habit.id || !inputValue[habit.id]}
                         onClick={() => handleReport(habit, Number(inputValue[habit.id]))}
-                        className="bg-emerald-600 text-white p-2 rounded-xl hover:bg-emerald-500 transition-all disabled:opacity-50"
+                        className="bg-brand-accent text-white p-2 rounded-xl hover:bg-brand-secondary transition-all disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-accent"
                       >
                         {submitting === habit.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                       </button>
@@ -2627,11 +3055,11 @@ function SubjectiveMetricsTrackerView({ user }: { user: User }) {
           return (
             <div key={metric.id} className="space-y-4">
               <div className="flex justify-between items-center">
-                <h4 className="font-bold text-white flex items-center gap-2">
+                <h4 className="font-bold text-white flex items-center gap-2 tracking-tight">
                   {metric.name}
-                  {isCompletedToday && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                  {isCompletedToday && <CheckCircle2 className="w-4 h-4 text-brand-accent" />}
                 </h4>
-                <span className="text-emerald-500 font-mono font-bold bg-emerald-500/10 px-3 py-1 rounded-full text-sm">
+                <span className="text-brand-accent font-mono font-bold bg-brand-accent/10 px-3 py-1 rounded-full text-sm">
                   {isCompletedToday ? metric.history[today] : currentValue} / {metric.scaleMax}
                 </span>
               </div>
@@ -2650,7 +3078,8 @@ function SubjectiveMetricsTrackerView({ user }: { user: User }) {
                     disabled={submitting === metric.id || isCompletedToday}
                     value={isCompletedToday ? metric.history[today] : currentValue}
                     onChange={(e) => setValues({ ...values, [metric.id]: parseInt(e.target.value) })}
-                    className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full h-2 bg-brand-focus rounded-lg appearance-none cursor-pointer accent-brand-accent disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand-accent"
+                    aria-label={`Rate ${metric.name} from 1 to ${metric.scaleMax}`}
                   />
                   <div className="absolute left-0 right-0 top-6 flex justify-between px-1">
                     {[...Array(metric.scaleMax)].map((_, i) => (
@@ -2667,7 +3096,7 @@ function SubjectiveMetricsTrackerView({ user }: { user: User }) {
                 <button
                   disabled={submitting === metric.id}
                   onClick={() => handleReport(metric)}
-                  className="w-full bg-slate-800 text-white py-2 rounded-xl font-bold hover:bg-slate-700 transition-all border border-slate-700 flex items-center justify-center gap-2"
+                  className="w-full bg-brand-surface text-white py-2 rounded-xl font-bold hover:bg-slate-700 transition-all border border-slate-700 flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-brand-accent"
                 >
                   {submitting === metric.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                   Log Response
@@ -2680,6 +3109,218 @@ function SubjectiveMetricsTrackerView({ user }: { user: User }) {
     </Card>
   );
 }
+
+// --- Session Reflection Components ---
+
+const ReflectionTemplateBuilder = ({ 
+  clientUid, 
+  coachUid, 
+  template, 
+  onSave 
+}: { 
+  clientUid: string; 
+  coachUid: string; 
+  template: ReflectionTemplate | null; 
+  onSave: (data: Partial<ReflectionTemplate>) => void 
+}) => {
+  const [questions, setQuestions] = useState<string[]>(template?.questions || [
+    "What was your biggest takeaway?",
+    "What is one hurdle you anticipate this week?",
+    "What do you need from our next session?"
+  ]);
+  const [isEnabled, setIsEnabled] = useState(template?.isEnabled ?? true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    await onSave({ questions, isEnabled });
+    setIsSaving(false);
+  };
+
+  const addQuestion = () => setQuestions([...questions, ""]);
+  const removeQuestion = (index: number) => setQuestions(questions.filter((_, i) => i !== index));
+  const updateQuestion = (index: number, value: string) => {
+    const next = [...questions];
+    next[index] = value;
+    setQuestions(next);
+  };
+
+  return (
+    <Card title="Reflection Template Builder" subtitle="Customize the questions your client sees after each session">
+      <div className="space-y-6">
+        <div className="flex items-center justify-between p-4 bg-brand-focus rounded-2xl border border-slate-700/50">
+          <div>
+            <p className="text-sm font-bold text-white">Enable Session Reflections</p>
+            <p className="text-xs text-slate-500">Clients will be prompted to reflect after each appointment.</p>
+          </div>
+          <button 
+            onClick={() => setIsEnabled(!isEnabled)}
+            className={cn(
+              "w-12 h-6 rounded-full transition-all relative",
+              isEnabled ? "bg-brand-accent" : "bg-slate-700"
+            )}
+          >
+            <div className={cn(
+              "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+              isEnabled ? "right-1" : "left-1"
+            )} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Questions</label>
+          {questions.map((q, i) => (
+            <div key={i} className="flex gap-2">
+              <input 
+                type="text"
+                value={q}
+                onChange={(e) => updateQuestion(i, e.target.value)}
+                placeholder="Enter a reflection question..."
+                className="flex-1 bg-brand-surface border border-slate-700 rounded-xl px-4 py-2 text-white text-sm focus:ring-2 focus:ring-brand-accent focus:outline-none"
+              />
+              <button 
+                onClick={() => removeQuestion(i)}
+                className="p-2 text-slate-500 hover:text-rose-400 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+          <button 
+            onClick={addQuestion}
+            className="w-full py-2 border border-dashed border-slate-700 rounded-xl text-slate-500 hover:text-brand-accent hover:border-brand-accent/50 transition-all text-xs font-bold flex items-center justify-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> Add Question
+          </button>
+        </div>
+
+        <button 
+          onClick={handleSave}
+          disabled={isSaving}
+          className="w-full bg-brand-accent text-white py-3 rounded-xl font-bold hover:bg-brand-secondary transition-all shadow-lg shadow-brand-accent/20 flex items-center justify-center gap-2"
+        >
+          {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+          Save Template
+        </button>
+      </div>
+    </Card>
+  );
+};
+
+const ReflectionResponseViewer = ({ reflections }: { reflections: Reflection[] }) => {
+  const sortedReflections = useMemo(() => {
+    return [...reflections].sort((a, b) => b.sessionDate.localeCompare(a.sessionDate));
+  }, [reflections]);
+
+  if (reflections.length === 0) {
+    return (
+      <Card title="Reflection History" subtitle="No reflections submitted yet">
+        <div className="text-center py-12 text-slate-600 italic text-sm">
+          Client hasn't submitted any reflections yet.
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card title="Reflection History" subtitle="Review all past session reflections">
+      <div className="space-y-6">
+        {sortedReflections.map((r) => (
+          <div key={r.id} className="bg-brand-focus border border-slate-700/50 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-4 pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-brand-accent/10 rounded-xl flex items-center justify-center text-brand-accent">
+                  <Brain className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-white">Session Reflection</p>
+                  <p className="text-xs text-slate-500">{format(parseISO(r.sessionDate), 'MMMM d, yyyy')}</p>
+                </div>
+              </div>
+              <Badge variant={r.status === 'submitted' ? 'success' : 'default'}>
+                {r.status === 'submitted' ? 'Submitted' : 'Draft'}
+              </Badge>
+            </div>
+            <div className="space-y-4">
+              {Object.entries(r.responses).map(([q, a]) => (
+                <div key={q}>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{q}</p>
+                  <p className="text-sm text-slate-300 whitespace-pre-wrap leading-relaxed">{a || 'No response provided.'}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+};
+
+const ReflectionEntryView = ({ 
+  template, 
+  appointment, 
+  existingReflection,
+  onSave 
+}: { 
+  template: ReflectionTemplate; 
+  appointment: Appointment; 
+  existingReflection: Reflection | null;
+  onSave: (responses: Record<string, string>, status: 'draft' | 'submitted') => void 
+}) => {
+  const [responses, setResponses] = useState<Record<string, string>>(existingReflection?.responses || {});
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async (status: 'draft' | 'submitted') => {
+    setIsSaving(true);
+    await onSave(responses, status);
+    setIsSaving(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <h2 className="text-2xl font-bold text-white">Session Reflection</h2>
+        <p className="text-slate-400 mt-1">Reflect on your session from {format(safeToDate(appointment.startTime), 'MMMM d, yyyy')}</p>
+      </header>
+
+      <Card title="Reflection Questions" subtitle="Take a moment to process your latest session">
+        <div className="space-y-6">
+          {template.questions.map((q) => (
+            <div key={q}>
+              <label className="block text-sm font-medium text-slate-300 mb-2">{q}</label>
+              <textarea 
+                value={responses[q] || ''}
+                onChange={(e) => setResponses({ ...responses, [q]: e.target.value })}
+                rows={4}
+                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent focus:outline-none"
+                placeholder="Type your thoughts here..."
+              />
+            </div>
+          ))}
+
+          <div className="flex gap-3 pt-4">
+            <button 
+              onClick={() => handleSave('draft')}
+              disabled={isSaving}
+              className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-medium hover:bg-slate-700 transition-all flex items-center justify-center gap-2"
+            >
+              {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FileCheck className="w-4 h-4" />}
+              Save Draft
+            </button>
+            <button 
+              onClick={() => handleSave('submitted')}
+              disabled={isSaving}
+              className="flex-1 py-3 bg-brand-accent text-white rounded-xl font-bold hover:bg-brand-secondary transition-all shadow-lg shadow-brand-accent/20 flex items-center justify-center gap-2"
+            >
+              {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+              Submit Reflection
+            </button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+};
 
 function DashboardView({ 
   user,
@@ -2695,8 +3336,11 @@ function DashboardView({
   onOpenCheckIn,
   habits = [],
   metrics = [],
+  reflectionTemplate,
+  reflections = [],
   notificationPermission,
-  onRequestNotifications
+  onRequestNotifications,
+  onOpenReflection
 }: any) {
   const nextAppointment = useMemo(() => {
     return appointments.find((a: any) => isAfter(safeToDate(a.startTime), new Date()) && a.status === 'scheduled');
@@ -2724,11 +3368,30 @@ function DashboardView({
     };
   }, [habits, metrics, profile]);
 
+  const reflectionDue = useMemo(() => {
+    if (profile?.role !== 'client' || !reflectionTemplate?.isEnabled) return null;
+    
+    // Find completed appointments in the last 24 hours that don't have a reflection
+    const oneDayAgo = addHours(new Date(), -24);
+    const recentAppts = appointments.filter((a: any) => {
+      const start = safeToDate(a.startTime);
+      return isAfter(start, oneDayAgo) && isBefore(start, new Date()) && a.status === 'completed';
+    });
+
+    for (const appt of recentAppts) {
+      const hasReflection = reflections.some((r: any) => r.appointmentId === appt.id && r.status === 'submitted');
+      if (!hasReflection) {
+        return appt;
+      }
+    }
+    return null;
+  }, [appointments, reflections, reflectionTemplate, profile]);
+
   const stats = [
     profile?.role === 'coach' 
       ? { label: 'Active Clients', value: clients.filter((c: any) => c.isActive !== false).length, icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10', tab: 'clients' }
       : { label: 'Shared Documents', value: documents.length, icon: FileText, color: 'text-blue-400', bg: 'bg-blue-400/10', tab: 'documents' },
-    { label: 'Upcoming Sessions', value: appointments.filter((a: any) => a.status === 'scheduled' && isAfter(safeToDate(a.startTime), new Date())).length, icon: Calendar, color: 'text-emerald-400', bg: 'bg-emerald-400/10', tab: 'calendar' },
+    { label: 'Upcoming Sessions', value: appointments.filter((a: any) => a.status === 'scheduled' && isAfter(safeToDate(a.startTime), new Date())).length, icon: Calendar, color: 'text-brand-accent', bg: 'bg-brand-accent/10', tab: 'calendar' },
     { label: 'New Messages', value: unreadCount, icon: MessageSquare, color: 'text-amber-400', bg: 'bg-amber-400/10', tab: 'messaging' },
   ];
 
@@ -2736,13 +3399,13 @@ function DashboardView({
     <div className="space-y-8">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white">Welcome back, {profile?.displayName?.split(' ')[0] || 'User'}</h2>
+          <h2 className="text-2xl font-bold text-white tracking-tight">Welcome back, {profile?.displayName?.split(' ')[0] || 'User'}</h2>
           <p className="text-slate-400 mt-1">Here's what's happening with your coaching portal today.</p>
         </div>
         {profile?.role === 'client' && (
           <button 
             onClick={onRequestSession}
-            className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/20"
+            className="flex items-center justify-center gap-2 bg-brand-accent text-white px-6 py-3 rounded-xl font-bold hover:bg-brand-secondary transition-all shadow-lg shadow-brand-accent/20 focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 focus:ring-offset-brand-focus"
           >
             <Plus className="w-5 h-5" /> Request Session
           </button>
@@ -2758,14 +3421,14 @@ function DashboardView({
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.1 }}
             onClick={() => setActiveTab(stat.tab)}
-            className="bg-slate-900 border border-slate-800 p-6 rounded-2xl hover:border-emerald-500/50 transition-all text-left group"
+            className="bg-brand-surface border border-slate-800/50 p-6 rounded-2xl hover:border-brand-accent/50 transition-all text-left group focus:outline-none focus:ring-2 focus:ring-brand-accent"
           >
             <div className="flex items-center gap-4">
               <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110", stat.bg)}>
                 <stat.icon className={cn("w-6 h-6", stat.color)} />
               </div>
               <div>
-                <p className="text-sm text-slate-400 font-medium group-hover:text-emerald-400 transition-colors">{stat.label}</p>
+                <p className="text-sm text-slate-400 font-medium group-hover:text-brand-accent transition-colors">{stat.label}</p>
                 <p className="text-2xl font-bold text-white">{stat.value}</p>
               </div>
             </div>
@@ -2776,88 +3439,93 @@ function DashboardView({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Daily Check-in Card for Clients */}
         {profile?.role === 'client' && (
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
             <motion.button
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.99 }}
               onClick={onOpenCheckIn}
               className={cn(
-                "w-full p-6 rounded-[2rem] shadow-xl text-left relative overflow-hidden group transition-all duration-500",
+                "w-full p-6 rounded-[2rem] shadow-xl text-left relative overflow-hidden group transition-all duration-500 focus:outline-none focus:ring-2 focus:ring-brand-accent",
                 checkInProgress?.isDone 
-                  ? "bg-slate-900 border border-emerald-500/30 shadow-emerald-500/5" 
-                  : "bg-gradient-to-br from-emerald-600 to-teal-700 shadow-emerald-900/20"
+                  ? "bg-brand-surface border border-brand-accent/30 shadow-brand-accent/5" 
+                  : "bg-gradient-to-br from-brand-focus to-brand-primary shadow-brand-primary/20"
               )}
             >
               <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:scale-110 transition-transform duration-700">
-                <ClipboardCheck className="w-32 h-32 text-white" />
+                <ClipboardCheck className="w-24 h-24 text-white" />
               </div>
               
-              <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-                <div className="max-w-xl">
+              <div className="relative z-10">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={cn(
+                    "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest",
+                    checkInProgress?.isDone ? "bg-brand-accent/20 text-brand-accent" : "bg-white/20 text-white"
+                  )}>
+                    {checkInProgress?.isDone ? 'Check-in Complete' : 'Daily Action Required'}
+                  </div>
+                </div>
+                <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">
+                  {checkInProgress?.isDone ? "You're all set!" : "Daily Check-in"}
+                </h3>
+                <div className="flex items-center gap-4 mt-4">
+                  <div className="text-2xl font-black text-white">
+                    {checkInProgress?.completed || 0}<span className="text-sm opacity-50 font-medium ml-1">/ {checkInProgress?.total || 0}</span>
+                  </div>
+                  <div className="flex-1 h-1.5 bg-black/20 rounded-full overflow-hidden">
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: `${checkInProgress?.percent || 0}%` }}
+                      className="h-full bg-brand-accent"
+                    />
+                  </div>
+                </div>
+              </div>
+            </motion.button>
+
+            {reflectionTemplate?.isEnabled && (
+              <motion.button
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.99 }}
+                onClick={() => reflectionDue && onOpenReflection(reflectionDue)}
+                className={cn(
+                  "w-full p-6 rounded-[2rem] shadow-xl text-left relative overflow-hidden group transition-all duration-500 focus:outline-none focus:ring-2 focus:ring-brand-accent",
+                  reflectionDue 
+                    ? "bg-gradient-to-br from-brand-accent to-brand-secondary shadow-brand-accent/20" 
+                    : "bg-brand-surface border border-slate-800 shadow-xl"
+                )}
+              >
+                <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:scale-110 transition-transform duration-700">
+                  <Brain className="w-24 h-24 text-white" />
+                </div>
+                
+                <div className="relative z-10">
                   <div className="flex items-center gap-3 mb-3">
                     <div className={cn(
                       "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest",
-                      checkInProgress?.isDone ? "bg-emerald-500/20 text-emerald-400" : "bg-white/20 text-white"
+                      reflectionDue ? "bg-white/20 text-white" : "bg-slate-800 text-slate-500"
                     )}>
-                      {checkInProgress?.isDone ? 'Check-in Complete' : 'Daily Action Required'}
+                      {reflectionDue ? 'Reflection Due' : 'Up to Date'}
                     </div>
-                    {checkInProgress?.isDone && (
-                      <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                    )}
                   </div>
-                  <h3 className="text-2xl md:text-3xl font-bold text-white mb-2">
-                    {checkInProgress?.isDone ? "You're all set!" : "Daily Check-in"}
+                  <h3 className="text-2xl font-bold text-white mb-2 tracking-tight">
+                    Session Reflection
                   </h3>
                   <p className={cn(
-                    "text-base leading-relaxed opacity-90",
-                    checkInProgress?.isDone ? "text-slate-400" : "text-emerald-50/80"
+                    "text-sm opacity-90",
+                    reflectionDue ? "text-white/80" : "text-slate-500"
                   )}>
-                    {checkInProgress?.isDone 
-                      ? "Great job staying consistent today. Your coach has been updated on your progress."
-                      : "Log your habits and track your metrics for today. Consistency is the key to progress!"}
+                    {reflectionDue 
+                      ? `Reflect on your session from ${format(safeToDate(reflectionDue.startTime), 'MMM d')}`
+                      : "No reflections due right now. Great job processing your sessions!"}
                   </p>
-                </div>
-
-                <div className="shrink-0 flex flex-col items-center md:items-end gap-3">
-                  {checkInProgress && (
-                    <div className="text-center md:text-right">
-                      <div className="text-3xl font-black text-white mb-1">
-                        {checkInProgress.completed}<span className="text-lg opacity-50 font-medium ml-1">/ {checkInProgress.total}</span>
-                      </div>
-                      <p className={cn(
-                        "text-[10px] font-bold uppercase tracking-widest",
-                        checkInProgress?.isDone ? "text-emerald-500" : "text-emerald-200"
-                      )}>
-                        Tasks Completed
-                      </p>
+                  {reflectionDue && (
+                    <div className="mt-4 inline-flex items-center gap-2 text-white font-bold text-sm">
+                      Reflect Now <ArrowRight className="w-4 h-4" />
                     </div>
                   )}
-                  <div className={cn(
-                    "px-6 py-3 rounded-2xl font-bold text-base flex items-center gap-2 transition-all shadow-lg",
-                    checkInProgress?.isDone 
-                      ? "bg-slate-800 text-slate-300 hover:bg-slate-700" 
-                      : "bg-white text-emerald-700 hover:shadow-white/10"
-                  )}>
-                    {checkInProgress?.isDone ? (
-                      <>Review Check-in <ArrowRight className="w-4 h-4" /></>
-                    ) : (
-                      <>Start Check-in <Plus className="w-5 h-5" /></>
-                    )}
-                  </div>
                 </div>
-              </div>
-
-              {/* Progress Bar */}
-              {checkInProgress && (
-                <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-black/10">
-                  <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${checkInProgress.percent}%` }}
-                    className="h-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]"
-                  />
-                </div>
-              )}
-            </motion.button>
+              </motion.button>
+            )}
           </div>
         )}
 
@@ -2868,17 +3536,17 @@ function DashboardView({
           action={
             <button 
               onClick={() => setActiveTab('calendar')}
-              className="text-emerald-500 text-sm font-medium hover:underline flex items-center gap-1"
+              className="text-brand-accent text-sm font-medium hover:underline flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-brand-accent rounded"
             >
               View Calendar <ChevronRight className="w-4 h-4" />
             </button>
           }
         >
           {nextAppointment ? (
-            <div className="bg-slate-800/50 rounded-2xl p-6 border border-slate-700/50">
+            <div className="bg-brand-focus rounded-2xl p-6 border border-slate-700/50">
               <div className="flex items-start justify-between mb-4">
                 <div>
-                  <h4 className="text-xl font-bold text-white">{nextAppointment.title}</h4>
+                  <h4 className="text-xl font-bold text-white tracking-tight">{nextAppointment.title}</h4>
                   {!isCalendarId(nextAppointment.clientEmail) && (
                     <p className="text-slate-400 text-sm mt-1">{nextAppointment.clientEmail}</p>
                   )}
@@ -2889,7 +3557,7 @@ function DashboardView({
                     href={getGoogleCalendarLink(nextAppointment)}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs text-emerald-500 hover:text-emerald-400 font-medium flex items-center gap-1 transition-colors"
+                    className="text-xs text-brand-accent hover:text-brand-secondary font-medium flex items-center gap-1 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-accent rounded"
                   >
                     <Calendar className="w-3 h-3" /> Add to Calendar
                   </a>
@@ -2897,11 +3565,11 @@ function DashboardView({
               </div>
               <div className="grid grid-cols-2 gap-4 mt-6">
                 <div className="flex items-center gap-3 text-slate-300">
-                  <Calendar className="w-5 h-5 text-emerald-500" />
+                  <Calendar className="w-5 h-5 text-brand-accent" />
                   <span className="text-sm">{format(safeToDate(nextAppointment.startTime), 'MMM d, yyyy')}</span>
                 </div>
                 <div className="flex items-center gap-3 text-slate-300">
-                  <Clock className="w-5 h-5 text-emerald-500" />
+                  <Clock className="w-5 h-5 text-brand-accent" />
                   <span className="text-sm">{format(safeToDate(nextAppointment.startTime), 'h:mm a')}</span>
                 </div>
               </div>
@@ -2910,7 +3578,7 @@ function DashboardView({
                   href={nextAppointment.meetLink} 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="mt-6 w-full flex items-center justify-center gap-2 bg-emerald-600/10 text-emerald-400 border border-emerald-600/20 py-3 rounded-xl hover:bg-emerald-600/20 transition-all"
+                  className="mt-6 w-full flex items-center justify-center gap-2 bg-brand-accent/10 text-brand-accent border border-brand-accent/20 py-3 rounded-xl hover:bg-brand-accent/20 transition-all focus:outline-none focus:ring-2 focus:ring-brand-accent"
                 >
                   <ExternalLink className="w-4 h-4" /> Join Google Meet
                 </a>
@@ -2947,7 +3615,7 @@ function DashboardView({
           action={
             <button 
               onClick={() => setActiveTab(profile?.role === 'coach' ? 'clients' : 'documents')}
-              className="text-emerald-500 text-sm font-medium hover:underline flex items-center gap-1"
+              className="text-brand-accent text-sm font-medium hover:underline flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-brand-accent rounded"
             >
               {profile?.role === 'coach' ? 'Manage Clients' : 'View All'} <ChevronRight className="w-4 h-4" />
             </button>
@@ -2959,10 +3627,10 @@ function DashboardView({
                 <button 
                   key={client.uid} 
                   onClick={() => onSelectClient(client)}
-                  className="w-full flex items-center justify-between p-3 bg-slate-800/30 rounded-xl border border-slate-700/30 hover:bg-slate-800/50 transition-all"
+                  className="w-full flex items-center justify-between p-3 bg-brand-surface rounded-xl border border-slate-700/30 hover:bg-brand-focus transition-all focus:outline-none focus:ring-2 focus:ring-brand-accent"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-xs">
+                    <div className="w-8 h-8 rounded-full bg-brand-accent/20 flex items-center justify-center text-brand-accent font-bold text-xs">
                       {client.displayName[0]}
                     </div>
                     <div className="text-left">
@@ -2975,20 +3643,20 @@ function DashboardView({
               ))
             ) : (
               documents.slice(0, 4).map((doc: any) => (
-                <div key={doc.id} className="flex items-center justify-between p-3 bg-slate-800/30 rounded-xl border border-slate-700/30 hover:bg-slate-800/50 transition-all group">
+                <div key={doc.id} className="flex items-center justify-between p-3 bg-brand-surface rounded-xl border border-slate-700/30 hover:bg-brand-focus transition-all group">
                   <a 
                     href={doc.url} 
                     target="_blank" 
                     rel="noopener noreferrer" 
-                    className="flex items-center gap-3 flex-1 min-w-0"
+                    className="flex items-center gap-3 flex-1 min-w-0 focus:outline-none focus:ring-2 focus:ring-brand-accent rounded"
                   >
                     <FileText className="w-5 h-5 text-amber-400 shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-white truncate group-hover:text-emerald-400 transition-colors">{doc.name}</p>
+                      <p className="text-sm font-medium text-white truncate group-hover:text-brand-accent transition-colors">{doc.name}</p>
                       <p className="text-xs text-slate-500">{format(safeToDate(doc.createdAt), 'MMM d')}</p>
                     </div>
                   </a>
-                  <a href={doc.url} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-white shrink-0">
+                  <a href={doc.url} target="_blank" rel="noopener noreferrer" className="p-2 text-slate-400 hover:text-white shrink-0 focus:outline-none focus:ring-2 focus:ring-brand-accent rounded">
                     <Download className="w-4 h-4" />
                   </a>
                 </div>
@@ -3731,7 +4399,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                 type="text" 
                 value={formData.name}
                 onChange={e => setFormData({...formData, name: e.target.value})}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
                 placeholder="John Doe"
               />
             </div>
@@ -3741,7 +4409,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                 type="tel" 
                 value={formData.phone}
                 onChange={e => setFormData({...formData, phone: e.target.value})}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
                 placeholder="864-209-1043"
               />
             </div>
@@ -3752,7 +4420,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                   type="number" 
                   value={formData.age}
                   onChange={e => setFormData({...formData, age: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                  className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
                   placeholder="25"
                 />
               </div>
@@ -3762,7 +4430,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                   type="text" 
                   value={formData.preferredName}
                   onChange={e => setFormData({...formData, preferredName: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                  className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
                   placeholder="Johnny"
                 />
               </div>
@@ -3779,8 +4447,8 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
 
             {age >= 13 && age <= 17 && (
               <div className="space-y-4 pt-4 border-t border-slate-800">
-                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl">
-                  <p className="text-emerald-400 text-sm font-medium">
+                <div className="p-4 bg-brand-accent/10 border border-brand-accent/20 rounded-2xl">
+                  <p className="text-brand-accent text-sm font-medium">
                     Note: For clients between 13 and 17, a parent or guardian will be the primary point of contact unless other arrangements have been made with Stewart Lee personally.
                   </p>
                 </div>
@@ -3792,7 +4460,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                       type="text" 
                       value={formData.parentName}
                       onChange={e => setFormData({...formData, parentName: e.target.value})}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                      className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
                     />
                   </div>
                   <div>
@@ -3801,7 +4469,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                       type="tel" 
                       value={formData.parentPhone}
                       onChange={e => setFormData({...formData, parentPhone: e.target.value})}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                      className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
                     />
                   </div>
                 </div>
@@ -3811,7 +4479,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                     type="email" 
                     value={formData.parentEmail}
                     onChange={e => setFormData({...formData, parentEmail: e.target.value})}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                    className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
                   />
                 </div>
 
@@ -3824,7 +4492,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                         type="text" 
                         value={formData.secondaryParentName}
                         onChange={e => setFormData({...formData, secondaryParentName: e.target.value})}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                        className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
                       />
                     </div>
                     <div>
@@ -3833,7 +4501,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                         type="tel" 
                         value={formData.secondaryParentPhone}
                         onChange={e => setFormData({...formData, secondaryParentPhone: e.target.value})}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                        className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
                       />
                     </div>
                   </div>
@@ -3843,7 +4511,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                       type="email" 
                       value={formData.secondaryParentEmail}
                       onChange={e => setFormData({...formData, secondaryParentEmail: e.target.value})}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                      className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
                     />
                   </div>
                 </div>
@@ -3861,7 +4529,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                 type="text" 
                 value={formData.emergencyContactName}
                 onChange={e => setFormData({...formData, emergencyContactName: e.target.value})}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
               />
             </div>
             <div>
@@ -3870,7 +4538,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                 type="tel" 
                 value={formData.emergencyContactPhone}
                 onChange={e => setFormData({...formData, emergencyContactPhone: e.target.value})}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
               />
             </div>
           </div>
@@ -3884,19 +4552,19 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
               <textarea 
                 value={formData.prompt}
                 onChange={e => setFormData({...formData, prompt: e.target.value})}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500 min-h-[100px]"
+                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent min-h-[100px]"
               />
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">What feels most challenging at the moment? *</label>
               <div className="grid grid-cols-1 gap-2">
                 {challengesOptions.map(option => (
-                  <label key={option} className="flex items-center gap-3 p-3 bg-slate-800/50 border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-800 transition-colors">
+                  <label key={option} className="flex items-center gap-3 p-3 bg-brand-surface border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-800 transition-colors">
                     <input 
                       type="checkbox"
                       checked={formData.challenges.includes(option)}
                       onChange={() => handleChallengeToggle(option)}
-                      className="w-4 h-4 rounded border-slate-700 text-emerald-500 focus:ring-emerald-500 bg-slate-900"
+                      className="w-4 h-4 rounded border-slate-700 text-brand-accent focus:ring-brand-accent bg-slate-900"
                     />
                     <span className="text-sm text-slate-300">{option}</span>
                   </label>
@@ -3907,7 +4575,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                     placeholder="Other..."
                     value={formData.otherChallenge}
                     onChange={e => setFormData({...formData, otherChallenge: e.target.value})}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                    className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
                   />
                 </div>
               </div>
@@ -3918,7 +4586,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
                 type="text" 
                 value={formData.duration}
                 onChange={e => setFormData({...formData, duration: e.target.value})}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
               />
             </div>
           </div>
@@ -3932,7 +4600,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
               <textarea 
                 value={formData.formalDiagnosis}
                 onChange={e => setFormData({...formData, formalDiagnosis: e.target.value})}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500 min-h-[100px]"
+                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent min-h-[100px]"
                 placeholder="Please share if you feel comfortable doing so."
               />
             </div>
@@ -3940,13 +4608,13 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Are you currently seeing a therapist or counselor? *</label>
               <div className="space-y-2">
                 {["Yes", "No", "Looking for one or looking for a new one"].map(option => (
-                  <label key={option} className="flex items-center gap-3 p-3 bg-slate-800/50 border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-800 transition-colors">
+                  <label key={option} className="flex items-center gap-3 p-3 bg-brand-surface border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-800 transition-colors">
                     <input 
                       type="radio"
                       name="therapist"
                       checked={formData.seeingTherapist === option}
                       onChange={() => setFormData({...formData, seeingTherapist: option})}
-                      className="w-4 h-4 border-slate-700 text-emerald-500 focus:ring-emerald-500 bg-slate-900"
+                      className="w-4 h-4 border-slate-700 text-brand-accent focus:ring-brand-accent bg-slate-900"
                     />
                     <span className="text-sm text-slate-300">{option}</span>
                   </label>
@@ -3964,20 +4632,20 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
               <textarea 
                 value={formData.strengths}
                 onChange={e => setFormData({...formData, strengths: e.target.value})}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500 min-h-[80px]"
+                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent min-h-[80px]"
               />
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Preferred session frequency: *</label>
               <div className="grid grid-cols-2 gap-2">
                 {["Weekly", "Biweekly", "Monthly", "As needed basis"].map(option => (
-                  <label key={option} className="flex items-center gap-3 p-3 bg-slate-800/50 border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-800 transition-colors">
+                  <label key={option} className="flex items-center gap-3 p-3 bg-brand-surface border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-800 transition-colors">
                     <input 
                       type="radio"
                       name="frequency"
                       checked={formData.frequency === option}
                       onChange={() => setFormData({...formData, frequency: option})}
-                      className="w-4 h-4 border-slate-700 text-emerald-500 focus:ring-emerald-500 bg-slate-900"
+                      className="w-4 h-4 border-slate-700 text-brand-accent focus:ring-brand-accent bg-slate-900"
                     />
                     <span className="text-sm text-slate-300">{option}</span>
                   </label>
@@ -3989,7 +4657,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
               <textarea 
                 value={formData.schedulingConstraints}
                 onChange={e => setFormData({...formData, schedulingConstraints: e.target.value})}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500 min-h-[80px]"
+                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent min-h-[80px]"
               />
             </div>
             <div>
@@ -3997,7 +4665,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
               <textarea 
                 value={formData.anythingElse}
                 onChange={e => setFormData({...formData, anythingElse: e.target.value})}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500 min-h-[80px]"
+                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent min-h-[80px]"
               />
             </div>
           </div>
@@ -4006,20 +4674,20 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
         return (
           <div className="space-y-6">
             <h3 className="text-xl font-bold text-white">Legal Agreements</h3>
-            <div className="p-6 bg-slate-800/30 border border-slate-800 rounded-2xl space-y-4">
+            <div className="p-6 bg-brand-surface border border-slate-800 rounded-2xl space-y-4">
               <p className="text-sm text-slate-400 leading-relaxed">
                 Please Note: Coaching is not therapy and is not a substitute for mental health treatment. If concerns arise that are outside the scope of coaching, referrals may be recommended.
               </p>
               <div className="space-y-3">
-                <label className="flex items-start gap-3 p-4 bg-slate-800/50 border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-800 transition-colors">
+                <label className="flex items-start gap-3 p-4 bg-brand-focus border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-800 transition-colors">
                   <input 
                     type="checkbox"
                     checked={formData.agreedToTerms}
                     onChange={e => setFormData({...formData, agreedToTerms: e.target.checked})}
-                    className="mt-1 w-5 h-5 rounded border-slate-700 text-emerald-500 focus:ring-emerald-500 bg-slate-900"
+                    className="mt-1 w-5 h-5 rounded border-slate-700 text-brand-accent focus:ring-brand-accent bg-slate-900"
                   />
                   <span className="text-sm text-slate-300">
-                    I have read and agree to the <a href="https://mrleeteaches.com/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-emerald-500 hover:underline">Privacy Policy</a> and <a href="https://mrleeteaches.com/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-emerald-500 hover:underline">Terms & Conditions</a>. *
+                    I have read and agree to the <a href="https://mrleeteaches.com/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-brand-accent hover:underline">Privacy Policy</a> and <a href="https://mrleeteaches.com/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-brand-accent hover:underline">Terms & Conditions</a>. *
                   </span>
                 </label>
               </div>
@@ -4032,19 +4700,19 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-brand-focus flex items-center justify-center p-4">
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl"
+        className="w-full max-w-2xl bg-brand-surface border border-slate-800/50 rounded-[2.5rem] overflow-hidden shadow-2xl"
       >
         <div className="p-8 md:p-12">
           <div className="flex items-center justify-between mb-8">
             <div>
-              <h2 className="text-3xl font-bold text-white mb-2">Welcome to Coaching</h2>
+              <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Welcome to Coaching</h2>
               <p className="text-slate-400">Please complete your onboarding intake form.</p>
             </div>
-            <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+            <div className="w-16 h-16 rounded-2xl bg-brand-accent/10 flex items-center justify-center text-brand-accent border border-brand-accent/20">
               <FileCheck className="w-8 h-8" />
             </div>
           </div>
@@ -4053,7 +4721,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
             {[1, 2, 3, 4, 5, 6].map(i => (
               <div 
                 key={i} 
-                className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${i <= step ? 'bg-emerald-500' : 'bg-slate-800'}`}
+                className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${i <= step ? 'bg-brand-accent' : 'bg-slate-800'}`}
               />
             ))}
           </div>
@@ -4066,7 +4734,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
             {step > 1 && (
               <button 
                 onClick={() => setStep(step - 1)}
-                className="flex items-center gap-2 px-6 py-4 bg-slate-800 text-slate-300 rounded-2xl font-bold hover:bg-slate-700 transition-all"
+                className="flex items-center gap-2 px-6 py-4 bg-brand-focus text-slate-300 rounded-2xl font-bold hover:bg-slate-800 transition-all border border-slate-700/50 focus:outline-none focus:ring-2 focus:ring-brand-accent"
               >
                 <ArrowLeft className="w-5 h-5" /> Back
               </button>
@@ -4075,7 +4743,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
               <button 
                 disabled={!isStepValid()}
                 onClick={() => setStep(step + 1)}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-500 shadow-lg shadow-emerald-600/20 disabled:opacity-50 transition-all"
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-4 bg-brand-accent text-white rounded-2xl font-bold hover:bg-brand-secondary shadow-lg shadow-brand-accent/20 disabled:opacity-50 transition-all focus:outline-none focus:ring-2 focus:ring-brand-accent"
               >
                 Next <ArrowRight className="w-5 h-5" />
               </button>
@@ -4083,7 +4751,7 @@ function OnboardingView({ user, onComplete }: { user: User, onComplete: () => vo
               <button 
                 disabled={!isStepValid() || loading}
                 onClick={handleSubmit}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-500 shadow-lg shadow-emerald-600/20 disabled:opacity-50 transition-all"
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-4 bg-brand-accent text-white rounded-2xl font-bold hover:bg-brand-secondary shadow-lg shadow-brand-accent/20 disabled:opacity-50 transition-all focus:outline-none focus:ring-2 focus:ring-brand-accent"
               >
                 {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <ShieldCheck className="w-5 h-5" />}
                 {loading ? 'Submitting...' : 'Complete Onboarding'}
@@ -4323,7 +4991,7 @@ function ClientsView({
             setError(null);
             setShowInviteModal(true);
           }}
-          className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-500 transition-colors"
+          className="flex items-center gap-2 bg-brand-accent text-white px-4 py-2 rounded-xl hover:bg-brand-secondary transition-all shadow-lg shadow-brand-accent/20 focus:outline-none focus:ring-2 focus:ring-brand-accent"
         >
           <UserPlus className="w-4 h-4" /> Add Client
         </button>
@@ -4337,16 +5005,16 @@ function ClientsView({
             placeholder="Search by name or email..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-800 rounded-2xl pl-12 pr-4 py-4 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            className="w-full bg-brand-surface border border-slate-800/50 rounded-2xl pl-12 pr-4 py-4 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent shadow-xl"
           />
         </div>
-        <div className="flex bg-slate-900 border border-slate-800 rounded-2xl p-1">
+        <div className="flex bg-brand-surface border border-slate-800/50 rounded-2xl p-1">
           {(['active', 'inactive', 'all'] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-6 py-3 rounded-xl text-sm font-bold transition-all ${
-                filter === f ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'
+              className={`px-6 py-3 rounded-xl text-sm font-bold transition-all focus:outline-none focus:ring-2 focus:ring-brand-accent ${
+                filter === f ? 'bg-brand-accent text-white shadow-lg shadow-brand-accent/20' : 'text-slate-400 hover:text-white'
               }`}
             >
               {f.charAt(0).toUpperCase() + f.slice(1)}
@@ -4364,19 +5032,19 @@ function ClientsView({
               layout
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-slate-900 border border-slate-800 p-6 rounded-2xl group hover:border-emerald-500/50 transition-all"
+              className="bg-brand-surface border border-slate-800/50 p-6 rounded-2xl group hover:border-brand-accent/50 transition-all shadow-xl"
             >
               <div className="flex items-center gap-4 mb-6">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500 font-bold text-xl">
+                <div className="w-14 h-14 rounded-2xl bg-brand-accent/10 flex items-center justify-center text-brand-accent font-bold text-xl border border-brand-accent/20">
                   {client.displayName?.[0] || '?'}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h4 className="text-lg font-bold text-white truncate">{client.displayName}</h4>
+                  <h4 className="text-lg font-bold text-white truncate tracking-tight">{client.displayName}</h4>
                   <p className="text-sm text-slate-500 truncate">{client.email}</p>
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <span className={`text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded-full ${
-                    client.isActive !== false ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-500/10 text-slate-500'
+                    client.isActive !== false ? 'bg-brand-accent/10 text-brand-accent' : 'bg-slate-500/10 text-slate-500'
                   }`}>
                     {client.isActive !== false ? 'Active' : 'Inactive'}
                   </span>
@@ -4385,8 +5053,9 @@ function ClientsView({
                       e.stopPropagation();
                       toggleClientStatus(client);
                     }}
-                    className={`w-10 h-6 rounded-full relative transition-colors ${
-                      client.isActive !== false ? 'bg-emerald-600' : 'bg-slate-700'
+                    aria-label={`Toggle ${client.displayName} status`}
+                    className={`w-10 h-6 rounded-full relative transition-colors focus:outline-none focus:ring-2 focus:ring-brand-accent ${
+                      client.isActive !== false ? 'bg-brand-accent' : 'bg-slate-700'
                     }`}
                   >
                     <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${
@@ -4397,11 +5066,11 @@ function ClientsView({
               </div>
               
               <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
+                <div className="bg-brand-focus p-3 rounded-xl border border-slate-700/50">
                   <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Sessions</p>
                   <p className="text-lg font-bold text-white">{clientAppts.length}</p>
                 </div>
-                <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
+                <div className="bg-brand-focus p-3 rounded-xl border border-slate-700/50">
                   <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">Joined</p>
                   <p className="text-sm font-bold text-white">{client.createdAt ? format(safeToDate(client.createdAt), 'MMM yyyy') : 'N/A'}</p>
                 </div>
@@ -4410,7 +5079,7 @@ function ClientsView({
               <div className="flex gap-2">
                 <button 
                   onClick={() => setSelectedClient(client)}
-                  className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-medium hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 py-3 bg-brand-focus text-slate-300 rounded-xl font-medium hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 border border-slate-700/50 focus:outline-none focus:ring-2 focus:ring-brand-accent"
                 >
                   View Profile <ChevronRight className="w-4 h-4" />
                 </button>
@@ -4420,7 +5089,7 @@ function ClientsView({
                     setEditData({ ...client });
                     setIsEditing(true);
                   }}
-                  className="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl hover:bg-emerald-500/20 transition-colors"
+                  className="p-3 bg-brand-accent/10 text-brand-accent rounded-xl hover:bg-brand-accent/20 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-accent"
                   title="Edit Profile"
                 >
                   <Edit2 className="w-5 h-5" />
@@ -5525,26 +6194,31 @@ const TOOLS = [
   
   {
     name: "Energy Balance Dashboard",
+    icon: Zap,
     description: "The Energy Balance Dashboard is a low-friction tool designed to help you visualize your daily capacity and prevent burnout using the principles of Energy Accounting. Simply log your morning readiness using the quick slider, then tap to rate your daily activities as either energy 'drains' or restorative 'deposits'. The dashboard automatically graphs your trends so you can easily see what depletes your battery, proactively plan your recovery time, and export a one-click summary for our coaching sessions.",
     link: "https://script.google.com/macros/s/AKfycbw0DA96tNM30wiDZu0Q2iI0vXB7a0Bw2-IHi1Dz4v_HcMHGJ2Qbm0fgx9IJvYeVXtJk4A/exec"
   },
   {
     name: "Task Deconstructor",
+    icon: Layers,
     description: "The Task Deconstructor is a low-friction tool designed to help you bypass executive dysfunction and overcome the paralysis of getting started. Simply type in an overwhelming task and click 'Deconstruct For Me' to let the app automatically break your goal into microscopic, highly specific actions. Once you begin, the tool activates Tunnel Vision by hiding the overarching list and displaying only one single step on the screen at a time. Just focus on the action in front of you, click the 'Done' button when finished, and seamlessly build momentum until the entire project is cleared.",
-    link: "https://script.google.com/macros/s/AKfycbwEusYxAKmAgSl3vs-LDPOS90HJ6wJygggfPDoi6eK4iyqKrZgdEpBAU5Y3NAQPWu8xtw/exec"
+    link: "https://script.google.com/macros/s/AKfycbEusYxAKmAgSl3vs-LDPOS90HJ6wJygggfPDoi6eK4iyqKrZgdEpBAU5Y3NAQPWu8xtw/exec"
   },
   {
     name: "Time-Blindness Visualizer",
+    icon: Hourglass,
     description: `The Time-Blindness Visualizer is a sensory-friendly pacing tool designed to replace anxiety-inducing numerical countdowns with a low-demand visual representation of time. Simply select or type in your desired duration, and the screen will display five green energy blocks that gently drain in halves as time passes, allowing you to gauge your remaining "time volume" at a quick glance without doing mental math. When your session is complete, a soft, harmonic singing bowl chime provides a gentle cue to transition, allowing you to easily reset for your next focused chunk of work. This tool is built specifically to protect your working memory and help you pace your energy without triggering demand avoidance.`,
     link: "https://script.google.com/macros/s/AKfycbypm9TIR_t_CFcF_3CKUOD8hWsGAb_4TH0T9X8mwGvgXnxsU1C9hdUqC6HXxhwrTfYv/exec"
   },
   {
     name: "Frictionless Brain Dump",
+    icon: Brain,
     description: `The Frictionless Brain Dump is designed to help you instantly externalize your working memory without the executive function tax of organizing your thoughts on the spot. Whether you have a sudden idea, a looming task, or simply need to process an emotion, just type or dictate your raw thoughts into the single text box and hit save. Every evening at 5:00 PM, the system automatically reviews your raw notes, sorts them into Tasks, Ideas, and Emotional Check-ins, and delivers a clean, organized digest straight to your inbox.`,
     link: "https://script.google.com/macros/s/AKfycby0zEDm3-rAxn62BpX9z2k3gIZMqr1VweCDjN-TO6z7aPvt1wGof0dX7ReaVwiELkY/exec"
   },
   {
     name: "Dear Man Batting Cage",
+    icon: MessageSquare,
     description: `The DEAR MAN Batting Cage is a safe, zero-pressure environment to practice the Dialectical Behavior Therapy (DBT) framework for effective communication. To build your skills, start by logging past or upcoming interpersonal challenges in the Tracker tab to isolate the facts from your emotional responses. When you are ready to test a scenario, switch to the Practice tab to roleplay the interaction with an AI partner who adapts to your approach and provides a real-time DEAR MAN scorecard. Over time, the Analysis dashboard will review your recent "at-bats" to identify patterns in your communication, highlighting your strengths and gently pointing out areas for improvement.`,
     link: "https://script.google.com/macros/s/AKfycbxTJxSijHyWlmXyRBCwtKRssaxQ3R6Ks7qcqHOvp3QNYeln8CZgJY1jdamwGEnOorbS/exec"
   }
@@ -5570,7 +6244,7 @@ function ToolsLibraryView() {
           {words.length > 30 && (
             <button 
               onClick={() => toggleExpand(index)}
-              className="ml-1 text-emerald-500 hover:text-emerald-400 font-medium focus:outline-none"
+              className="ml-1 text-brand-accent hover:text-brand-secondary font-medium focus:outline-none focus:ring-2 focus:ring-brand-accent rounded px-1"
             >
               less
             </button>
@@ -5584,7 +6258,7 @@ function ToolsLibraryView() {
         {words.slice(0, 30).join(' ')}...
         <button 
           onClick={() => toggleExpand(index)}
-          className="ml-1 text-emerald-500 hover:text-emerald-400 font-medium focus:outline-none"
+          className="ml-1 text-brand-accent hover:text-brand-secondary font-medium focus:outline-none focus:ring-2 focus:ring-brand-accent rounded px-1"
         >
           more
         </button>
@@ -5595,17 +6269,17 @@ function ToolsLibraryView() {
   return (
     <div className="space-y-8">
       <header>
-        <h2 className="text-2xl font-bold text-white">Tools Library</h2>
+        <h2 className="text-2xl font-bold text-white tracking-tight">Tools Library</h2>
         <p className="text-slate-400 mt-1">Access useful Apps Script applications and tools.</p>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {TOOLS.map((tool, index) => (
-          <div key={index} className="bg-slate-900 border border-slate-800 p-6 rounded-2xl group hover:border-emerald-500/50 transition-all flex flex-col">
-            <div className="w-12 h-12 bg-emerald-600/10 rounded-xl flex items-center justify-center text-emerald-500 mb-4">
-              <Wrench className="w-6 h-6" />
+          <div key={index} className="bg-brand-surface border border-slate-800/50 p-6 rounded-2xl group hover:border-brand-accent/50 transition-all flex flex-col shadow-xl">
+            <div className="w-12 h-12 bg-brand-accent/10 rounded-xl flex items-center justify-center text-brand-accent mb-4 border border-brand-accent/20">
+              <tool.icon className="w-6 h-6" />
             </div>
-            <h3 className="text-lg font-semibold text-white mb-2">{tool.name}</h3>
+            <h3 className="text-lg font-bold text-white mb-2 tracking-tight">{tool.name}</h3>
             <div className="text-sm text-slate-400 mb-6 flex-1 leading-relaxed">
               {getTruncatedText(tool.description, index)}
             </div>
@@ -5613,7 +6287,7 @@ function ToolsLibraryView() {
               href={tool.link} 
               target="_blank" 
               rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 w-full py-3 bg-slate-800 text-white rounded-xl font-medium hover:bg-emerald-600 transition-all group-hover:shadow-lg group-hover:shadow-emerald-600/10"
+              className="flex items-center justify-center gap-2 w-full py-3 bg-brand-focus text-white rounded-xl font-bold hover:bg-slate-800 transition-all group-hover:shadow-lg group-hover:shadow-brand-accent/10 border border-slate-700/50 focus:outline-none focus:ring-2 focus:ring-brand-accent"
             >
               Open Tool <ExternalLink className="w-4 h-4" />
             </a>
@@ -5887,6 +6561,11 @@ function LibraryView({ clients, user }: { clients: UserProfile[], user: User }) 
 function DocumentsView({ documents, role, user }: any) {
   const [uploading, setUploading] = useState(false);
   const [selectedClient, setSelectedClient] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    id: string;
+    name: string;
+    onConfirm: () => Promise<void>;
+  } | null>(null);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -5915,20 +6594,67 @@ function DocumentsView({ documents, role, user }: any) {
     }
   };
 
-  const handleDelete = async (docId: string, url: string) => {
-    if (!confirm('Are you sure you want to delete this document?')) return;
-    try {
-      await deleteDoc(doc(db, 'documents', docId));
-      // Optionally delete from storage too
-      // const storageRef = ref(storage, url);
-      // await deleteObject(storageRef);
-    } catch (error) {
-      console.error(error);
-    }
+  const handleDelete = async (docId: string, url: string, name: string) => {
+    setDeleteConfirm({
+      id: docId,
+      name,
+      onConfirm: async () => {
+        await deleteDoc(doc(db, 'documents', docId));
+      }
+    });
   };
 
   return (
     <div className="space-y-8">
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deleteConfirm && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeleteConfirm(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-2">Delete Document?</h3>
+              <p className="text-slate-400 mb-8">
+                Are you sure you want to delete "<span className="text-white font-semibold">{deleteConfirm.name}</span>"? This action cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setDeleteConfirm(null)}
+                  className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-medium hover:bg-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={async () => {
+                    try {
+                      await deleteConfirm.onConfirm();
+                      setDeleteConfirm(null);
+                    } catch (error) {
+                      handleFirestoreError(error, OperationType.DELETE, `documents/${deleteConfirm.id}`);
+                    }
+                  }}
+                  className="flex-1 py-3 bg-rose-600 text-white rounded-xl font-medium hover:bg-rose-500 shadow-lg shadow-rose-600/20 transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
       <header className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-white">Document Library</h2>
@@ -5991,7 +6717,7 @@ function DocumentsView({ documents, role, user }: any) {
                 </a>
                 {role === 'coach' && (
                   <button 
-                    onClick={() => handleDelete(doc.id, doc.url)}
+                    onClick={() => handleDelete(doc.id, doc.url, doc.name)}
                     className="p-2 bg-slate-800 text-slate-400 hover:text-rose-400 rounded-lg transition-colors"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -6260,7 +6986,7 @@ function SettingsView({ profile, role, notificationPermission, onRequestNotifica
           <Card title="Profile Information" subtitle="Update your public profile details">
             <div className="space-y-6">
               <div className="flex items-center gap-6">
-                <div className="w-20 h-20 rounded-3xl bg-emerald-500/10 flex items-center justify-center text-emerald-500 text-3xl font-bold overflow-hidden">
+                <div className="w-20 h-20 rounded-3xl bg-brand-accent/10 flex items-center justify-center text-brand-accent text-3xl font-bold overflow-hidden border border-brand-accent/20">
                   {profile?.photoURL ? (
                     <img src={profile.photoURL} alt="Avatar" className="w-full h-full object-cover" />
                   ) : (
@@ -6278,7 +7004,7 @@ function SettingsView({ profile, role, notificationPermission, onRequestNotifica
                   <button 
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading}
-                    className="bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-700 transition-colors disabled:opacity-50"
+                    className="bg-brand-focus text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-800 transition-colors disabled:opacity-50 border border-slate-700/50 focus:outline-none focus:ring-2 focus:ring-brand-accent"
                   >
                     {uploading ? 'Uploading...' : 'Change Avatar'}
                   </button>
@@ -6320,14 +7046,14 @@ function SettingsView({ profile, role, notificationPermission, onRequestNotifica
                     rows={4}
                     value={emailTemplate}
                     onChange={(e) => setEmailTemplate(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
                   />
                   <p className="text-xs text-slate-500 mt-2">Available variables: {'{title}'}, {'{time}'}, {'{date}'}</p>
                 </div>
                 <button 
                   onClick={handleUpdateTemplate}
                   disabled={saving}
-                  className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                  className="bg-brand-accent text-white px-6 py-3 rounded-xl font-medium hover:bg-brand-secondary transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-accent"
                 >
                   {saving ? 'Updating...' : 'Update Templates'}
                 </button>
@@ -6348,7 +7074,7 @@ function SettingsView({ profile, role, notificationPermission, onRequestNotifica
                         const hours = e.target.value.split(',').map(h => parseInt(h.trim())).filter(h => !isNaN(h));
                         setSyncSettings({...syncSettings, calendarSyncHours: hours});
                       }}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
                       placeholder="e.g. 6, 12"
                     />
                     <p className="text-[10px] text-slate-500 mt-1">Comma separated hours in 24h format.</p>
@@ -6361,7 +7087,7 @@ function SettingsView({ profile, role, notificationPermission, onRequestNotifica
                         min="0" max="23"
                         value={syncSettings.reminderStartHour}
                         onChange={(e) => setSyncSettings({...syncSettings, reminderStartHour: parseInt(e.target.value)})}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
                       />
                     </div>
                     <div className="flex-1">
@@ -6371,7 +7097,7 @@ function SettingsView({ profile, role, notificationPermission, onRequestNotifica
                         min="0" max="23"
                         value={syncSettings.reminderEndHour}
                         onChange={(e) => setSyncSettings({...syncSettings, reminderEndHour: parseInt(e.target.value)})}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
                       />
                     </div>
                   </div>
@@ -6382,7 +7108,7 @@ function SettingsView({ profile, role, notificationPermission, onRequestNotifica
                     id="catchAll"
                     checked={syncSettings.catchAllAfterEnd}
                     onChange={(e) => setSyncSettings({...syncSettings, catchAllAfterEnd: e.target.checked})}
-                    className="w-5 h-5 rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-emerald-500"
+                    className="w-5 h-5 rounded bg-brand-focus border-slate-700 text-brand-accent focus:ring-brand-accent"
                   />
                   <label htmlFor="catchAll" className="text-sm text-slate-300">
                     Send evening reminders at the last sync of the day ({syncSettings.reminderEndHour}:00 EST)
@@ -6391,7 +7117,7 @@ function SettingsView({ profile, role, notificationPermission, onRequestNotifica
                 <button 
                   onClick={handleUpdateSyncSettings}
                   disabled={saving}
-                  className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                  className="bg-brand-accent text-white px-6 py-3 rounded-xl font-medium hover:bg-brand-secondary transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand-accent"
                 >
                   {saving ? 'Saving...' : 'Save Sync Settings'}
                 </button>
@@ -6401,11 +7127,11 @@ function SettingsView({ profile, role, notificationPermission, onRequestNotifica
 
           <Card title="Notifications" subtitle="Manage how you receive updates">
             <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-slate-800/30 rounded-2xl border border-slate-700/30">
+              <div className="flex items-center justify-between p-4 bg-brand-surface rounded-2xl border border-slate-700/30">
                 <div className="flex items-center gap-4">
                   <div className={cn(
                     "w-10 h-10 rounded-xl flex items-center justify-center",
-                    notificationPermission === 'granted' ? "bg-emerald-500/10 text-emerald-500" : 
+                    notificationPermission === 'granted' ? "bg-brand-accent/10 text-brand-accent" : 
                     notificationPermission === 'denied' ? "bg-rose-500/10 text-rose-500" : "bg-slate-500/10 text-slate-500"
                   )}>
                     <Bell className="w-5 h-5" />
@@ -6423,7 +7149,7 @@ function SettingsView({ profile, role, notificationPermission, onRequestNotifica
                   >
                     <p className={cn(
                       "text-sm font-bold text-white",
-                      notificationPermission === 'default' && "group-hover:text-emerald-400 underline decoration-emerald-500/30 underline-offset-4"
+                      notificationPermission === 'default' && "group-hover:text-brand-accent underline decoration-brand-accent/30 underline-offset-4"
                     )}>
                       Web Notifications
                     </p>
@@ -6436,7 +7162,7 @@ function SettingsView({ profile, role, notificationPermission, onRequestNotifica
                 {notificationPermission === 'default' && (
                   <button 
                     onClick={onRequestNotifications}
-                    className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-emerald-500 transition-all"
+                    className="bg-brand-accent text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-brand-secondary transition-all focus:outline-none focus:ring-2 focus:ring-brand-accent"
                   >
                     Enable
                   </button>
@@ -6450,25 +7176,25 @@ function SettingsView({ profile, role, notificationPermission, onRequestNotifica
                   </div>
                 )}
                 {notificationPermission === 'granted' && (
-                  <div className="text-xs text-emerald-500 font-medium flex items-center gap-1">
+                  <div className="text-xs text-brand-accent font-medium flex items-center gap-1">
                     <CheckCircle2 className="w-4 h-4" /> Active
                   </div>
                 )}
               </div>
               
-              <div className="p-4 bg-slate-800/20 rounded-2xl border border-dashed border-slate-700">
+              <div className="p-4 bg-brand-focus rounded-2xl border border-dashed border-slate-700">
                 <p className="text-xs text-slate-500 leading-relaxed">
                   When enabled, you will receive real-time notifications for:
                 </p>
                 <ul className="mt-2 space-y-1">
                   <li className="text-xs text-slate-400 flex items-center gap-2">
-                    <div className="w-1 h-1 rounded-full bg-emerald-500" /> Appointment Reminders
+                    <div className="w-1 h-1 rounded-full bg-brand-accent" /> Appointment Reminders
                   </li>
                   <li className="text-xs text-slate-400 flex items-center gap-2">
-                    <div className="w-1 h-1 rounded-full bg-emerald-500" /> Shared Documents
+                    <div className="w-1 h-1 rounded-full bg-brand-accent" /> Shared Documents
                   </li>
                   <li className="text-xs text-slate-400 flex items-center gap-2">
-                    <div className="w-1 h-1 rounded-full bg-emerald-500" /> Message Notifications
+                    <div className="w-1 h-1 rounded-full bg-brand-accent" /> Message Notifications
                   </li>
                 </ul>
               </div>

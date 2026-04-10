@@ -153,6 +153,34 @@
       },
       "required": ["clientUid", "name", "reportingType", "streak", "createdAt"]
     },
+    "ReflectionTemplate": {
+      "title": "Reflection Template",
+      "description": "A set of questions for client session reflections.",
+      "type": "object",
+      "properties": {
+        "coachUid": { "type": "string", "description": "Coach's UID" },
+        "clientUid": { "type": "string", "description": "Client's UID (if specific to a client)" },
+        "questions": { "type": "array", "items": { "type": "string" }, "description": "List of reflection questions" },
+        "isEnabled": { "type": "boolean", "description": "Whether reflection is enabled for this client" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update time" }
+      },
+      "required": ["coachUid", "questions", "isEnabled"]
+    },
+    "Reflection": {
+      "title": "Reflection",
+      "description": "A client's reflection on a coaching session.",
+      "type": "object",
+      "properties": {
+        "clientUid": { "type": "string", "description": "Client's UID" },
+        "appointmentId": { "type": "string", "description": "Associated appointment ID" },
+        "sessionDate": { "type": "string", "format": "date-time", "description": "Date of the session" },
+        "responses": { "type": "object", "description": "Map of questions to client responses" },
+        "status": { "type": "string", "enum": ["draft", "submitted"], "description": "Reflection status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation time" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update time" }
+      },
+      "required": ["clientUid", "appointmentId", "responses", "status", "createdAt"]
+    },
     "SyncConfig": {
       "title": "Sync Configuration",
       "description": "Dynamic scheduling settings for background tasks.",
@@ -202,6 +230,14 @@
     "/habits/{habitId}": {
       "schema": "Habit",
       "description": "Client habits"
+    },
+    "/reflection_templates/{templateId}": {
+      "schema": "ReflectionTemplate",
+      "description": "Reflection templates for clients"
+    },
+    "/reflections/{reflectionId}": {
+      "schema": "Reflection",
+      "description": "Client session reflections"
     },
     "/settings/sync_config": {
       "schema": "SyncConfig",
