@@ -285,6 +285,32 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
+    function isValidLibraryGoal(data) {
+      return data.keys().hasAll(['text', 'coachUid']) &&
+             hasOnlyAllowedFields(['text', 'coachUid', 'usageCount']) &&
+             data.text is string && data.text.size() < 500 &&
+             data.coachUid == request.auth.uid;
+    }
+
+    function isValidLibraryObjective(data) {
+      return data.keys().hasAll(['text', 'goalText', 'coachUid']) &&
+             hasOnlyAllowedFields(['text', 'goalText', 'coachUid', 'usageCount']) &&
+             data.text is string && data.text.size() < 1000 &&
+             data.goalText is string && data.goalText.size() < 500 &&
+             data.coachUid == request.auth.uid;
+    }
+
+    function isValidTreatmentPlan(data) {
+      return data.keys().hasAll(['clientUid', 'coachUid', 'goalTitle', 'objectives', 'status', 'createdAt']) &&
+             hasOnlyAllowedFields(['clientUid', 'coachUid', 'goalTitle', 'objectives', 'status', 'createdAt', 'updatedAt']) &&
+             data.clientUid is string &&
+             data.coachUid == request.auth.uid &&
+             data.goalTitle is string && data.goalTitle.size() < 500 &&
+             data.objectives is list &&
+             data.status in ['active', 'completed', 'archived'] &&
+             data.createdAt is timestamp;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -416,6 +442,24 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isValidReflection(request.resource.data);
       allow update: if isAuthenticated() && request.auth.uid == resource.data.clientUid && isValidReflection(request.resource.data);
       allow delete: if isCoach() || (isAuthenticated() && request.auth.uid == resource.data.clientUid);
+    }
+
+    match /library_goals/{goalId} {
+      allow read: if isCoach();
+      allow write: if isCoach() && isValidLibraryGoal(request.resource.data);
+      allow delete: if isCoach();
+    }
+
+    match /library_objectives/{objectiveId} {
+      allow read: if isCoach();
+      allow write: if isCoach() && isValidLibraryObjective(request.resource.data);
+      allow delete: if isCoach();
+    }
+
+    match /treatment_plans/{planId} {
+      allow read: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.clientUid);
+      allow write: if isCoach() && isValidTreatmentPlan(request.resource.data);
+      allow delete: if isCoach();
     }
   }
 }

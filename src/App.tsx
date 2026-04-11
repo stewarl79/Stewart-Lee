@@ -78,6 +78,9 @@ import firebaseConfig from '../firebase-applet-config.json';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { format, isAfter, isBefore, addHours, startOfDay, endOfDay, parseISO, differenceInHours, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay } from 'date-fns';
+import { GoogleGenAI, Type } from "@google/genai";
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -279,6 +282,36 @@ interface SubjectiveMetric {
   createdAt: any;
 }
 
+interface LibraryGoal {
+  id: string;
+  text: string;
+  coachUid: string;
+  usageCount?: number;
+}
+
+interface LibraryObjective {
+  id: string;
+  text: string;
+  goalText: string;
+  coachUid: string;
+  usageCount?: number;
+}
+
+interface TreatmentPlan {
+  id: string;
+  clientUid: string;
+  coachUid: string;
+  goalTitle: string;
+  objectives: {
+    text: string;
+    status: 'In Progress' | 'Steady Momentum' | 'Achieved' | 'Paused';
+    createdAt: any;
+  }[];
+  status: 'active' | 'completed' | 'archived';
+  createdAt: any;
+  updatedAt?: any;
+}
+
 const isCalendarId = (email: string) => {
   return email.includes('calendar.google.com');
 };
@@ -360,6 +393,545 @@ const Badge = ({ children, variant = 'default' }: { children: React.ReactNode; v
 };
 
 // --- Coaching Dashboard Component ---
+
+function TreatmentPlanModule({ client, user }: { client: any; user: any }) {
+  const [plans, setPlans] = useState<TreatmentPlan[]>([]);
+  const [libraryGoals, setLibraryGoals] = useState<LibraryGoal[]>([]);
+  const [libraryObjectives, setLibraryObjectives] = useState<LibraryObjective[]>([]);
+  const [isCreating, setIsCreating] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<TreatmentPlan | null>(null);
+  const [newPlanGoal, setNewPlanGoal] = useState('');
+  const [newPlanObjectives, setNewPlanObjectives] = useState<{ text: string; status: TreatmentPlan['objectives'][0]['status'] }[]>([]);
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const [isRefining, setIsRefining] = useState<number | null>(null);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!client?.uid) return;
+    const q = query(collection(db, 'treatment_plans'), where('clientUid', '==', client.uid), orderBy('createdAt', 'desc'));
+    return onSnapshot(q, (snapshot) => {
+      setPlans(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TreatmentPlan)));
+    });
+  }, [client.uid]);
+
+  useEffect(() => {
+    if (editingPlan) {
+      setNewPlanGoal(editingPlan.goalTitle);
+      setNewPlanObjectives(editingPlan.objectives.map(o => ({ text: o.text, status: o.status })));
+      setIsCreating(true);
+    } else {
+      setNewPlanGoal('');
+      setNewPlanObjectives([]);
+    }
+  }, [editingPlan]);
+
+  useEffect(() => {
+    const qGoals = query(collection(db, 'library_goals'));
+    const qObjs = query(collection(db, 'library_objectives'));
+    
+    const unsubGoals = onSnapshot(qGoals, (snapshot) => {
+      setLibraryGoals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LibraryGoal)));
+    });
+    const unsubObjs = onSnapshot(qObjs, (snapshot) => {
+      setLibraryObjectives(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LibraryObjective)));
+    });
+    
+    return () => {
+      unsubGoals();
+      unsubObjs();
+    };
+  }, []);
+
+  const handleAddPlan = async () => {
+    if (!newPlanGoal) return;
+    
+    // Persistence: Save goal to library if new
+    const existingGoal = libraryGoals.find(g => g.text.toLowerCase() === newPlanGoal.toLowerCase());
+    if (!existingGoal) {
+      await addDoc(collection(db, 'library_goals'), {
+        text: newPlanGoal,
+        coachUid: user.uid,
+        usageCount: 1
+      });
+    } else {
+      await updateDoc(doc(db, 'library_goals', existingGoal.id), {
+        usageCount: (existingGoal.usageCount || 0) + 1
+      });
+    }
+
+    // Persistence: Save objectives to library if new
+    for (const obj of newPlanObjectives) {
+      const existingObj = libraryObjectives.find(lo => lo.text.toLowerCase() === obj.text.toLowerCase() && lo.goalText.toLowerCase() === newPlanGoal.toLowerCase());
+      if (!existingObj) {
+        await addDoc(collection(db, 'library_objectives'), {
+          text: obj.text,
+          goalText: newPlanGoal,
+          coachUid: user.uid,
+          usageCount: 1
+        });
+      } else {
+        await updateDoc(doc(db, 'library_objectives', existingObj.id), {
+          usageCount: (existingObj.usageCount || 0) + 1
+        });
+      }
+    }
+
+    const planData = {
+      clientUid: client.uid,
+      coachUid: user.uid,
+      goalTitle: newPlanGoal,
+      objectives: newPlanObjectives.map(o => ({ ...o, createdAt: Timestamp.now() })),
+      status: editingPlan ? editingPlan.status : 'active',
+      updatedAt: serverTimestamp()
+    };
+
+    if (editingPlan) {
+      await updateDoc(doc(db, 'treatment_plans', editingPlan.id), planData);
+    } else {
+      await addDoc(collection(db, 'treatment_plans'), {
+        ...planData,
+        createdAt: serverTimestamp()
+      });
+    }
+
+    setIsCreating(false);
+    setEditingPlan(null);
+    setNewPlanGoal('');
+    setNewPlanObjectives([]);
+  };
+
+  const handleDeletePlan = async (planId: string) => {
+    if (!window.confirm('Are you sure you want to delete this treatment plan?')) return;
+    setIsDeleting(planId);
+    try {
+      await deleteDoc(doc(db, 'treatment_plans', planId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `treatment_plans/${planId}`);
+    } finally {
+      setIsDeleting(null);
+    }
+  };
+
+  const updateObjectiveStatus = async (plan: TreatmentPlan, objIndex: number, newStatus: TreatmentPlan['objectives'][0]['status']) => {
+    const updatedObjectives = [...plan.objectives];
+    updatedObjectives[objIndex] = { ...updatedObjectives[objIndex], status: newStatus };
+    
+    try {
+      await updateDoc(doc(db, 'treatment_plans', plan.id), {
+        objectives: updatedObjectives,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `treatment_plans/${plan.id}`);
+    }
+  };
+
+  const updatePlanStatus = async (planId: string, newStatus: TreatmentPlan['status']) => {
+    try {
+      await updateDoc(doc(db, 'treatment_plans', planId), {
+        status: newStatus,
+        updatedAt: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `treatment_plans/${planId}`);
+    }
+  };
+
+  const suggestObjectives = async () => {
+    if (!newPlanGoal) return;
+    setIsSuggesting(true);
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Suggest 3-5 measurable, "Wiley-style" objectives for the following coaching goal: "${newPlanGoal}". 
+        The objectives should be neurodiversity-affirming and strength-based. 
+        Return them as a JSON array of strings.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING }
+          }
+        }
+      });
+      const suggestions = JSON.parse(response.text);
+      setNewPlanObjectives([...newPlanObjectives, ...suggestions.map((s: string) => ({ text: s, status: 'In Progress' }))]);
+    } catch (error) {
+      console.error("AI Suggestion failed", error);
+    } finally {
+      setIsSuggesting(false);
+    }
+  };
+
+  const refineObjective = async (index: number) => {
+    const obj = newPlanObjectives[index];
+    if (!obj.text) return;
+    setIsRefining(index);
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Make the following coaching objective more measurable, neurodiversity-affirming, and strength-based: "${obj.text}". 
+        Return only the refined objective text.`,
+      });
+      const refined = response.text.trim();
+      const updated = [...newPlanObjectives];
+      updated[index].text = refined;
+      setNewPlanObjectives(updated);
+    } catch (error) {
+      console.error("AI Refinement failed", error);
+    } finally {
+      setIsRefining(null);
+    }
+  };
+
+  const filteredLibraryGoals = libraryGoals.filter(g => g.text.toLowerCase().includes(newPlanGoal.toLowerCase()) && newPlanGoal.length > 2);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xl font-bold text-white flex items-center gap-2">
+          <ClipboardCheck className="w-6 h-6 text-emerald-500" /> Treatment Plans
+        </h3>
+        <button 
+          onClick={() => setIsCreating(true)}
+          className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-500 transition-all flex items-center gap-2 shadow-lg shadow-emerald-600/20"
+        >
+          <Plus className="w-4 h-4" /> New Plan
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6">
+        {plans.map(plan => (
+          <Card 
+            key={plan.id} 
+            title={plan.goalTitle} 
+            subtitle={`Created ${format(safeToDate(plan.createdAt), 'MMM d, yyyy')}`}
+            action={
+              <div className="flex items-center gap-2">
+                <select 
+                  value={plan.status}
+                  onChange={(e) => updatePlanStatus(plan.id, e.target.value as TreatmentPlan['status'])}
+                  className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                >
+                  <option value="active">Active</option>
+                  <option value="completed">Completed</option>
+                  <option value="archived">Archived</option>
+                </select>
+                <button 
+                  onClick={() => setEditingPlan(plan)}
+                  className="p-2 text-slate-400 hover:text-white transition-colors"
+                  title="Edit Plan"
+                >
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button 
+                  onClick={() => handleDeletePlan(plan.id)}
+                  disabled={isDeleting === plan.id}
+                  className="p-2 text-slate-400 hover:text-rose-500 transition-colors disabled:opacity-50"
+                  title="Delete Plan"
+                >
+                  {isDeleting === plan.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                </button>
+              </div>
+            }
+          >
+            <div className="space-y-4">
+              {plan.objectives.map((obj, idx) => (
+                <div key={idx} className="flex items-center justify-between p-4 bg-slate-800/30 rounded-xl border border-slate-800">
+                  <p className="text-slate-200 text-sm flex-1 mr-4">{obj.text}</p>
+                  <select 
+                    value={obj.status}
+                    onChange={(e) => updateObjectiveStatus(plan, idx, e.target.value as any)}
+                    className={cn(
+                      "px-3 py-1 rounded-lg text-xs font-bold transition-all focus:outline-none",
+                      obj.status === 'Achieved' ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" :
+                      obj.status === 'Steady Momentum' ? "bg-blue-500/10 text-blue-500 border border-blue-500/20" :
+                      obj.status === 'Paused' ? "bg-slate-700 text-slate-400 border border-slate-600" :
+                      "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                    )}
+                  >
+                    <option value="In Progress">In Progress</option>
+                    <option value="Steady Momentum">Steady Momentum</option>
+                    <option value="Achieved">Achieved</option>
+                    <option value="Paused">Paused</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+          </Card>
+        ))}
+        {plans.length === 0 && (
+          <div className="text-center py-12 bg-slate-900/50 rounded-3xl border border-dashed border-slate-800">
+            <ClipboardCheck className="w-12 h-12 text-slate-800 mx-auto mb-4" />
+            <p className="text-slate-500">No treatment plans created for this client yet.</p>
+          </div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {isCreating && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsCreating(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto"
+            >
+              <h3 className="text-2xl font-bold text-white mb-6">{editingPlan ? 'Edit' : 'Create'} Treatment Plan</h3>
+              
+              <div className="space-y-6">
+                <div className="relative">
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2 tracking-wider">Goal / Focus Area</label>
+                  <input 
+                    type="text"
+                    value={newPlanGoal}
+                    onChange={(e) => setNewPlanGoal(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-emerald-500"
+                    placeholder="e.g., Emotional Regulation"
+                  />
+                  {filteredLibraryGoals.length > 0 && (
+                    <div className="absolute z-10 w-full mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden">
+                      {filteredLibraryGoals.map(g => (
+                        <button
+                          key={g.id}
+                          onClick={() => {
+                            setNewPlanGoal(g.text);
+                            const relatedObjs = libraryObjectives.filter(o => o.goalText === g.text);
+                            setNewPlanObjectives(relatedObjs.map(o => ({ text: o.text, status: 'In Progress' })));
+                          }}
+                          className="w-full px-4 py-3 text-left text-slate-300 hover:bg-slate-700 hover:text-white transition-colors border-b border-slate-700 last:border-0"
+                        >
+                          {g.text} <span className="text-[10px] text-emerald-500 ml-2 font-bold uppercase">Library Match</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Measurable Objectives</label>
+                    <button 
+                      onClick={suggestObjectives}
+                      disabled={!newPlanGoal || isSuggesting}
+                      className="text-xs font-bold text-emerald-500 hover:text-emerald-400 flex items-center gap-1 disabled:opacity-50"
+                    >
+                      {isSuggesting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                      Suggest with AI
+                    </button>
+                  </div>
+                  
+                  {newPlanObjectives.map((obj, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <div className="flex-1 relative">
+                        <textarea 
+                          value={obj.text}
+                          onChange={(e) => {
+                            const updated = [...newPlanObjectives];
+                            updated[idx].text = e.target.value;
+                            setNewPlanObjectives(updated);
+                          }}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:ring-2 focus:ring-emerald-500 min-h-[80px]"
+                        />
+                        <button 
+                          onClick={() => refineObjective(idx)}
+                          disabled={isRefining === idx}
+                          className="absolute bottom-3 right-3 p-1.5 bg-slate-700 text-slate-400 hover:text-emerald-500 rounded-lg transition-colors"
+                          title="Make this measurable with AI"
+                        >
+                          {isRefining === idx ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3" />}
+                        </button>
+                      </div>
+                      <button 
+                        onClick={() => setNewPlanObjectives(newPlanObjectives.filter((_, i) => i !== idx))}
+                        className="p-3 text-slate-600 hover:text-rose-500"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    </div>
+                  ))}
+
+                  <button 
+                    onClick={() => setNewPlanObjectives([...newPlanObjectives, { text: '', status: 'In Progress' }])}
+                    className="w-full py-3 border-2 border-dashed border-slate-800 rounded-xl text-slate-500 hover:text-slate-300 hover:border-slate-700 transition-all flex items-center justify-center gap-2 font-bold text-sm"
+                  >
+                    <Plus className="w-4 h-4" /> Add Objective
+                  </button>
+                </div>
+
+                <div className="flex gap-3 pt-6">
+                  <button 
+                    onClick={() => {
+                      setIsCreating(false);
+                      setEditingPlan(null);
+                    }}
+                    className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-medium hover:bg-slate-700"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleAddPlan}
+                    disabled={!newPlanGoal || newPlanObjectives.length === 0}
+                    className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-500 shadow-lg shadow-emerald-600/20 disabled:opacity-50"
+                  >
+                    {editingPlan ? 'Update' : 'Save'} Treatment Plan
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function TreatmentLibraryView() {
+  const [goals, setGoals] = useState<LibraryGoal[]>([]);
+  const [objectives, setObjectives] = useState<LibraryObjective[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    const qGoals = query(collection(db, 'library_goals'), orderBy('usageCount', 'desc'));
+    const qObjs = query(collection(db, 'library_objectives'), orderBy('usageCount', 'desc'));
+    
+    const unsubGoals = onSnapshot(qGoals, (snapshot) => {
+      setGoals(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LibraryGoal)));
+      setLoading(false);
+    });
+    const unsubObjs = onSnapshot(qObjs, (snapshot) => {
+      setObjectives(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LibraryObjective)));
+    });
+    
+    return () => {
+      unsubGoals();
+      unsubObjs();
+    };
+  }, []);
+
+  const handleDeleteGoal = async (id: string) => {
+    await deleteDoc(doc(db, 'library_goals', id));
+  };
+
+  const handleDeleteObjective = async (id: string) => {
+    await deleteDoc(doc(db, 'library_objectives', id));
+  };
+
+  const filteredGoals = goals.filter(g => g.text.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  return (
+    <div className="space-y-8">
+      <div className="relative">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" />
+        <input 
+          type="text"
+          placeholder="Search library..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full bg-slate-900 border border-slate-800 rounded-2xl pl-12 pr-4 py-4 text-white focus:ring-2 focus:ring-emerald-500"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-8">
+        {filteredGoals.map(goal => (
+          <div key={goal.id} className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden">
+            <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-800/20">
+              <div>
+                <h3 className="text-lg font-bold text-white">{goal.text}</h3>
+                <p className="text-xs text-slate-500 uppercase font-bold tracking-widest mt-1">Used {goal.usageCount || 0} times</p>
+              </div>
+              <button 
+                onClick={() => handleDeleteGoal(goal.id)}
+                className="p-2 text-slate-600 hover:text-rose-500 transition-colors"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {objectives.filter(o => o.goalText === goal.text).map(obj => (
+                <div key={obj.id} className="flex items-center justify-between p-4 bg-slate-800/30 rounded-2xl border border-slate-800 group">
+                  <p className="text-slate-300 text-sm">{obj.text}</p>
+                  <button 
+                    onClick={() => handleDeleteObjective(obj.id)}
+                    className="p-2 text-slate-600 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RoadmapView({ client }: { client: any }) {
+  const [plans, setPlans] = useState<TreatmentPlan[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!client?.uid) return;
+    const q = query(collection(db, 'treatment_plans'), where('clientUid', '==', client.uid), where('status', '==', 'active'));
+    return onSnapshot(q, (snapshot) => {
+      setPlans(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TreatmentPlan)));
+      setLoading(false);
+    });
+  }, [client.uid]);
+
+  if (loading) return <div className="py-20 text-center text-slate-500">Loading roadmap...</div>;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-500">
+          <Zap className="w-5 h-5" />
+        </div>
+        <h3 className="text-xl font-bold text-white tracking-tight">Your Coaching Roadmap</h3>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6">
+        {plans.map(plan => (
+          <div key={plan.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
+            <h4 className="text-lg font-bold text-white mb-6">{plan.goalTitle}</h4>
+            <div className="space-y-3">
+              {plan.objectives.map((obj, idx) => (
+                <div key={idx} className="flex items-center justify-between p-4 bg-slate-800/30 rounded-2xl border border-slate-800">
+                  <p className="text-slate-200 text-sm font-medium">{obj.text}</p>
+                  <div className={cn(
+                    "px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest",
+                    obj.status === 'Achieved' ? "bg-emerald-500/10 text-emerald-500" :
+                    obj.status === 'Steady Momentum' ? "bg-blue-500/10 text-blue-500" :
+                    obj.status === 'Paused' ? "bg-slate-700 text-slate-400" :
+                    "bg-amber-500/10 text-amber-500"
+                  )}>
+                    {obj.status}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {plans.length === 0 && (
+          <div className="text-center py-12 bg-slate-900/50 rounded-3xl border border-dashed border-slate-800">
+            <Layers className="w-12 h-12 text-slate-800 mx-auto mb-4" />
+            <p className="text-slate-500">Your coaching roadmap is being prepared.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => void }) {
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -629,6 +1201,8 @@ function CoachingDashboardView({ client, onBack }: { client: any; onBack: () => 
           </button>
         </div>
       </header>
+
+      <TreatmentPlanModule client={client} user={auth.currentUser} />
 
       {/* Habit Tracker Section */}
       <section className="space-y-4">
@@ -3435,6 +4009,10 @@ function DashboardView({
           </motion.button>
         ))}
       </div>
+
+      {profile?.role === 'client' && (
+        <RoadmapView client={profile} />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Daily Check-in Card for Clients */}
@@ -6306,6 +6884,7 @@ function LibraryView({ clients, user }: { clients: UserProfile[], user: User }) 
   const [selectedClient, setSelectedClient] = useState<string>('');
   const [isSharing, setIsSharing] = useState(false);
   const [driveConnected, setDriveConnected] = useState<boolean | null>(null);
+  const [activeLibraryTab, setActiveLibraryTab] = useState<'drive' | 'treatment'>('drive');
 
   useEffect(() => {
     checkDriveStatus();
@@ -6430,72 +7009,99 @@ function LibraryView({ clients, user }: { clients: UserProfile[], user: User }) 
       <header className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-white">Resource Library</h2>
-          <p className="text-slate-400 mt-1">Browse and share documents from your Google Drive library.</p>
+          <p className="text-slate-400 mt-1">Browse and share resources with your clients.</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
           <button 
-            onClick={fetchLibrary}
-            className="p-2 text-slate-400 hover:text-white transition-colors"
-            title="Refresh Library"
+            onClick={() => setActiveLibraryTab('drive')}
+            className={cn(
+              "px-4 py-2 rounded-lg text-sm font-bold transition-all",
+              activeLibraryTab === 'drive' ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"
+            )}
           >
-            <RefreshCw className={cn("w-5 h-5", loading && "animate-spin")} />
+            Google Drive
           </button>
           <button 
-            onClick={handleDisconnectDrive}
-            className="p-2 text-slate-400 hover:text-rose-500 transition-colors"
-            title="Disconnect Google Drive"
+            onClick={() => setActiveLibraryTab('treatment')}
+            className={cn(
+              "px-4 py-2 rounded-lg text-sm font-bold transition-all",
+              activeLibraryTab === 'treatment' ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"
+            )}
           >
-            <LogOut className="w-5 h-5" />
+            Treatment Library
           </button>
         </div>
       </header>
 
-      {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1, 2, 3, 4, 5, 6].map(i => (
-            <div key={i} className="h-40 bg-slate-900 border border-slate-800 rounded-2xl animate-pulse" />
-          ))}
-        </div>
-      ) : error ? (
-        <div className="p-8 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-400 text-center">
-          {error}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {files.map((file: any) => (
-            <div key={file.id} className="bg-slate-900 border border-slate-800 p-6 rounded-2xl group hover:border-emerald-500/50 transition-all">
-              <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center">
-                  <img src={file.iconLink} alt="" className="w-6 h-6" referrerPolicy="no-referrer" />
-                </div>
-                <div className="flex gap-2">
-                  <a 
-                    href={file.webViewLink} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="p-2 text-slate-500 hover:text-white transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                  </a>
-                </div>
-              </div>
-              <h4 className="text-white font-bold mb-6 line-clamp-2 h-12">{file.name}</h4>
-              <button 
-                onClick={() => setSharingFile(file)}
-                className="w-full py-3 bg-emerald-600/10 text-emerald-500 rounded-xl font-bold hover:bg-emerald-600 hover:text-white transition-all flex items-center justify-center gap-2"
-              >
-                <Share2 className="w-4 h-4" /> Share with Client
-              </button>
+      {activeLibraryTab === 'drive' ? (
+        <>
+          <div className="flex items-center justify-end gap-4">
+            <button 
+              onClick={fetchLibrary}
+              className="p-2 text-slate-400 hover:text-white transition-colors"
+              title="Refresh Library"
+            >
+              <RefreshCw className={cn("w-5 h-5", loading && "animate-spin")} />
+            </button>
+            <button 
+              onClick={handleDisconnectDrive}
+              className="p-2 text-slate-400 hover:text-rose-500 transition-colors"
+              title="Disconnect Google Drive"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[1, 2, 3, 4, 5, 6].map(i => (
+                <div key={i} className="h-40 bg-slate-900 border border-slate-800 rounded-2xl animate-pulse" />
+              ))}
             </div>
-          ))}
-          {files.length === 0 && (
-            <div className="col-span-full text-center py-20 bg-slate-900/50 rounded-3xl border border-dashed border-slate-800">
-              <Library className="w-16 h-16 text-slate-800 mx-auto mb-4" />
-              <p className="text-slate-600">No files found in your library folder.</p>
-              <p className="text-slate-700 text-sm mt-2">Make sure you've set the correct GOOGLE_DRIVE_LIBRARY_FOLDER_ID.</p>
+          ) : error ? (
+            <div className="p-8 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-400 text-center">
+              {error}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {files.map((file: any) => (
+                <div key={file.id} className="bg-slate-900 border border-slate-800 p-6 rounded-2xl group hover:border-emerald-500/50 transition-all">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center">
+                      <img src={file.iconLink} alt="" className="w-6 h-6" referrerPolicy="no-referrer" />
+                    </div>
+                    <div className="flex gap-2">
+                      <a 
+                        href={file.webViewLink} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="p-2 text-slate-500 hover:text-white transition-colors"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    </div>
+                  </div>
+                  <h4 className="text-white font-bold mb-6 line-clamp-2 h-12">{file.name}</h4>
+                  <button 
+                    onClick={() => setSharingFile(file)}
+                    className="w-full py-3 bg-emerald-600/10 text-emerald-500 rounded-xl font-bold hover:bg-emerald-600 hover:text-white transition-all flex items-center justify-center gap-2"
+                  >
+                    <Share2 className="w-4 h-4" /> Share with Client
+                  </button>
+                </div>
+              ))}
+              {files.length === 0 && (
+                <div className="col-span-full text-center py-20 bg-slate-900/50 rounded-3xl border border-dashed border-slate-800">
+                  <Library className="w-16 h-16 text-slate-800 mx-auto mb-4" />
+                  <p className="text-slate-600">No files found in your library folder.</p>
+                  <p className="text-slate-700 text-sm mt-2">Make sure you've set the correct GOOGLE_DRIVE_LIBRARY_FOLDER_ID.</p>
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
+      ) : (
+        <TreatmentLibraryView />
       )}
 
       {/* Share Modal */}
