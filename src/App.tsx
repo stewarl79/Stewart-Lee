@@ -27,6 +27,8 @@ import {
   RefreshCw,
   Share2,
   Library,
+  Mic2,
+  MessageCircle,
   MessageSquare,
   FolderOpen,
   ShieldCheck,
@@ -82,6 +84,8 @@ import { format, isAfter, isBefore, addHours, startOfDay, endOfDay, parseISO, di
 import { GoogleGenAI, Type } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+import { ABCWorksheet } from './components/tools/ABCWorksheet';
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -839,58 +843,7 @@ function TreatmentPlanModule({ client, user }: { client: any; user: any }) {
   );
 }
 
-function ABCReframingModal({ client, user, isOpen, onClose, entry }: { client: any; user: any; isOpen: boolean; onClose: () => void; entry?: ABCReframing | null }) {
-  const [formData, setFormData] = useState({
-    situation: '',
-    thoughts: '',
-    consequences: '',
-    realisticReflection: '',
-    futureReflection: ''
-  });
-  const [isSaving, setIsSaving] = useState(false);
-
-  useEffect(() => {
-    if (entry) {
-      setFormData({
-        situation: entry.situation,
-        thoughts: entry.thoughts,
-        consequences: entry.consequences || '',
-        realisticReflection: entry.realisticReflection || '',
-        futureReflection: entry.futureReflection || ''
-      });
-    } else {
-      setFormData({ situation: '', thoughts: '', consequences: '', realisticReflection: '', futureReflection: '' });
-    }
-  }, [entry, isOpen]);
-
-  const handleSave = async () => {
-    if (!formData.situation || !formData.thoughts || !formData.consequences) return;
-    setIsSaving(true);
-
-    const data = {
-      clientUid: client.uid,
-      coachUid: user.uid,
-      ...formData,
-      updatedAt: serverTimestamp()
-    };
-
-    try {
-      if (entry) {
-        await updateDoc(doc(db, 'abc_reframing', entry.id), data);
-      } else {
-        await addDoc(collection(db, 'abc_reframing'), {
-          ...data,
-          createdAt: serverTimestamp()
-        });
-      }
-      onClose();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'abc_reframing');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
+function ABCReframingModal({ client, user, isOpen, onClose, entry, isToolsSite }: { client: any; user: any; isOpen: boolean; onClose: () => void; entry?: ABCReframing | null; isToolsSite?: boolean }) {
   return (
     <AnimatePresence>
       {isOpen && (
@@ -908,104 +861,19 @@ function ABCReframingModal({ client, user, isOpen, onClose, entry }: { client: a
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
             className="relative w-full max-w-4xl bg-brand-surface border border-slate-800 rounded-3xl p-8 shadow-2xl overflow-y-auto max-h-[90vh]"
           >
-            <div className="flex items-center gap-4 mb-8">
-              <div className="w-12 h-12 bg-brand-accent/10 rounded-2xl flex items-center justify-center text-brand-accent">
-                <Activity className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-2xl font-bold text-white tracking-tight">ABC Cognitive Worksheet</h3>
-                <p className="text-slate-400 text-sm">{entry ? 'Edit your worksheet' : 'Identify and externalize stuck points'}</p>
-              </div>
-            </div>
-
-            <div className="space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="space-y-3">
-                  <label className="flex items-center gap-2 text-xs font-black text-slate-500 uppercase tracking-widest px-1">
-                    <span className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-white text-[10px]">A</span>
-                    Activating Event
-                  </label>
-                  <p className="text-[10px] text-slate-500 font-medium px-1 italic">"Something happens"</p>
-                  <textarea 
-                    value={formData.situation}
-                    onChange={e => setFormData({...formData, situation: e.target.value})}
-                    placeholder="Describe the facts of the event..."
-                    className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4 text-white text-sm focus:ring-2 focus:ring-brand-accent transition-all min-h-[150px] resize-none"
-                  />
-                </div>
-
-                <div className="space-y-3">
-                  <label className="flex items-center gap-2 text-xs font-black text-amber-500 uppercase tracking-widest px-1">
-                    <span className="w-6 h-6 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 text-[10px]">B</span>
-                    Belief / Stuck Point
-                  </label>
-                  <p className="text-[10px] text-amber-500/60 font-medium px-1 italic">"I tell myself something"</p>
-                  <textarea 
-                    value={formData.thoughts}
-                    onChange={e => setFormData({...formData, thoughts: e.target.value})}
-                    placeholder="What did you tell yourself about the situation?"
-                    className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4 text-white text-sm focus:ring-2 focus:ring-amber-500 transition-all min-h-[150px] resize-none"
-                  />
-                </div>
-
-                <div className="space-y-3">
-                  <label className="flex items-center gap-2 text-xs font-black text-indigo-500 uppercase tracking-widest px-1">
-                    <span className="w-6 h-6 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-500 text-[10px]">C</span>
-                    Consequence
-                  </label>
-                  <p className="text-[10px] text-indigo-500/60 font-medium px-1 italic">"I feel something"</p>
-                  <textarea 
-                    value={formData.consequences}
-                    onChange={e => setFormData({...formData, consequences: e.target.value})}
-                    placeholder="How did you feel or react?"
-                    className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4 text-white text-sm focus:ring-2 focus:ring-indigo-500 transition-all min-h-[150px] resize-none"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-6 pt-6 border-t border-slate-800">
-                <div className="space-y-3">
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest px-1">
-                    Are my thoughts above in column B realistic or helpful?
-                  </label>
-                  <textarea 
-                    value={formData.realisticReflection}
-                    onChange={e => setFormData({...formData, realisticReflection: e.target.value})}
-                    placeholder="Evaluate your beliefs..."
-                    className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl px-5 py-4 text-white text-sm focus:ring-2 focus:ring-brand-accent transition-all min-h-[80px]"
-                  />
-                </div>
-
-                <div className="space-y-3">
-                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest px-1">
-                    What can I tell myself on such occasions in the future?
-                  </label>
-                  <textarea 
-                    value={formData.futureReflection}
-                    onChange={e => setFormData({...formData, futureReflection: e.target.value})}
-                    placeholder="Write a more balanced perspective for next time..."
-                    className="w-full bg-slate-900/50 border border-slate-800 rounded-2xl px-5 py-4 text-white text-sm focus:ring-2 focus:ring-brand-accent transition-all min-h-[80px]"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <button 
-                  onClick={onClose}
-                  className="flex-1 py-4 bg-slate-800 text-slate-300 rounded-2xl font-bold hover:bg-slate-700 transition-all"
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={handleSave}
-                  disabled={isSaving || !formData.situation || !formData.thoughts || !formData.consequences}
-                  className="flex-1 py-4 bg-brand-accent text-white rounded-2xl font-bold hover:bg-brand-secondary transition-all shadow-lg shadow-brand-accent/20 flex items-center justify-center gap-2"
-                >
-                  {isSaving ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-                  {entry ? 'Update Entry' : 'Save Entry'}
-                </button>
-              </div>
-            </div>
+            <button 
+              onClick={onClose} 
+              className="absolute top-6 right-6 p-2 text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-700 rounded-xl transition-all"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <ABCWorksheet 
+              initialData={entry} 
+              onSave={onClose}
+              isPrivate={isToolsSite}
+              clientUid={client?.uid}
+              coachUid={user?.uid}
+            />
           </motion.div>
         </div>
       )}
@@ -2585,9 +2453,25 @@ const MessagingView = ({
 // --- Main App ---
 
 export default function App() {
+  const [forcedSiteView, setForcedSiteView] = useState<'auto' | 'portal' | 'tools'>('auto');
+
+  const isToolsSite = useMemo(() => {
+    if (forcedSiteView === 'tools') return true;
+    if (forcedSiteView === 'portal') return false;
+    // In AI Studio preview, we can toggle this for testing, but in production it will detect the domain
+    return window.location.hostname.includes('tools') || window.location.hostname.includes('mrleeteaches-tools');
+  }, [forcedSiteView]);
+
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState('dashboard');
+
+  useEffect(() => {
+    if (isToolsSite) {
+      setActiveTab('tools');
+    }
+  }, [isToolsSite]);
+
   const [loading, setLoading] = useState(true);
   const [selectedCoachingClient, setSelectedCoachingClient] = useState<any>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -2684,6 +2568,7 @@ export default function App() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordChangeError, setPasswordChangeError] = useState('');
   const [passwordChangeLoading, setPasswordChangeLoading] = useState(false);
+  const [openTool, setOpenTool] = useState<{ name: string; type: 'basic' | 'advanced'; component: React.ReactNode } | null>(null);
   
   // Auth UI states
   const [authMode, setAuthMode] = useState<'login' | 'signup' | 'forgot'>('login');
@@ -3351,6 +3236,13 @@ export default function App() {
   };
 
   const renderContent = () => {
+    if (isToolsSite && activeTab === 'dashboard') {
+      return <GettingStartedView isToolsSite={true} setActiveTab={setActiveTab} />;
+    }
+    if (isToolsSite && activeTab === 'privacy') {
+      return <PrivacyVaultView />;
+    }
+
     switch (activeTab) {
       case 'dashboard': return (
         <DashboardView 
@@ -3422,7 +3314,7 @@ export default function App() {
         />
       );
       case 'library': return <LibraryView clients={clients} user={user} />;
-      case 'tools': return <ToolsLibraryView setActiveTab={setActiveTab} onOpenABC={() => setShowABCReframingModal(true)} />;
+      case 'tools': return <ToolsLibraryView setActiveTab={setActiveTab} onOpenABC={() => setShowABCReframingModal(true)} onOpenTool={(name, type, component) => setOpenTool({ name, type, component })} />;
       case 'documents': return <DocumentsView documents={documents} role={profile?.role} user={user} />;
       case 'reflection': return (
         clientReflectionTemplate && selectedReflectionAppointment ? (
@@ -3467,6 +3359,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-brand-focus text-slate-200 flex">
+      <ToolModal 
+        isOpen={!!openTool} 
+        onClose={() => setOpenTool(null)} 
+        title={openTool?.name || ''}
+        type={openTool?.type || 'basic'}
+      >
+        {openTool?.component}
+      </ToolModal>
       <a 
         href="#main-content" 
         className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 bg-brand-accent text-white p-3 rounded-lg z-[150] font-bold outline-none ring-2 ring-white"
@@ -3475,31 +3375,88 @@ export default function App() {
       </a>
 
       {/* Sidebar - Desktop */}
-      <aside className="hidden lg:flex flex-col w-72 bg-[#0b1121] border-r border-slate-800/50 p-6">
-        <button 
-          onClick={() => setActiveTab('dashboard')}
-          className="flex items-center gap-3 mb-10 px-2 hover:opacity-80 transition-opacity text-left focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-xl"
-        >
-          <div className="w-10 h-10">
-            <img 
-              src="/logo.png" 
-              alt="Logo" 
-              className="w-full h-full object-contain rounded-xl"
-              onError={(e) => {
-                e.currentTarget.src = 'https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png';
-              }}
-            />
+      <aside className={isToolsSite 
+        ? "hidden lg:flex flex-col w-64 bg-[#0b1121] border-r border-slate-800/50 overflow-y-auto no-scrollbar"
+        : "hidden lg:flex flex-col w-72 bg-[#0b1121] border-r border-slate-800/50 p-6 overflow-y-auto"}>
+        {isToolsSite ? (
+          <div className="p-6 flex items-start border-b border-slate-800/50 mb-4 animate-in fade-in slide-in-from-left duration-500">
+            <div className="w-12 h-12 rounded-full border border-slate-700 overflow-hidden shrink-0 mr-3 shadow-sm bg-brand-focus">
+              <img 
+                src="https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png" 
+                alt="Mr. Lee Teaches Logo" 
+                className="w-full h-full object-cover"
+              />
+            </div>
+            
+            <div className="flex flex-col min-w-0 pt-0.5">
+              <h1 className="text-lg font-bold text-white tracking-tight leading-none mb-2">MrLeeTeaches</h1>
+              
+              <div className="flex flex-col gap-1.5 text-[11px] font-medium text-slate-300">
+                <span className="truncate block">
+                  <span aria-hidden="true" className="mr-0.5">💬</span> Neurodivergent Advocate
+                </span>
+                <div className="flex items-center gap-1.5 truncate">
+                  <span><span aria-hidden="true" className="mr-0.5">🗣️</span> Speaker</span>
+                  <span className="text-slate-600" aria-hidden="true">|</span>
+                  <span><span aria-hidden="true" className="mr-0.5">🤯</span> Consultant</span>
+                </div>
+              </div>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-white tracking-tight leading-none">MrLeeTeaches</h1>
-            <p className="text-brand-accent text-[10px] font-bold uppercase tracking-wider mt-1">Neurodiversity Coaching</p>
-          </div>
-        </button>
+        ) : (
+          <button 
+            onClick={() => setActiveTab('dashboard')}
+            className="flex items-center gap-3 mb-10 px-2 hover:opacity-80 transition-opacity text-left focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-xl"
+          >
+            <div className="w-10 h-10">
+              <img 
+                src="/logo.png" 
+                alt="Logo" 
+                className="w-full h-full object-contain rounded-xl"
+                onError={(e) => {
+                  e.currentTarget.src = 'https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png';
+                }}
+              />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-white tracking-tight leading-none">MrLeeTeaches</h1>
+              <p className="text-brand-accent text-[10px] font-bold uppercase tracking-wider mt-1">Neurodiversity Coaching</p>
+            </div>
+          </button>
+        )}
 
-        <nav className="flex-1 space-y-2">
-          <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-          <SidebarItem icon={Calendar} label="Calendar" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />
-          {profile?.role === 'client' && clientReflectionTemplate?.isEnabled && (
+        <nav className={`flex-1 space-y-2 ${isToolsSite ? 'px-4' : ''}`}>
+          {!isToolsSite ? (
+            <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+          ) : (
+            <SidebarItem icon={Zap} label="Getting Started" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+          )}
+
+          <div className="px-3 py-2">
+            <button 
+              onClick={() => {
+                const nextView = isToolsSite ? 'portal' : 'tools';
+                setForcedSiteView(nextView);
+                setActiveTab(nextView === 'tools' ? 'tools' : 'dashboard');
+              }}
+              className="w-full group flex items-center justify-between px-4 py-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all text-left"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 bg-indigo-500 rounded-lg text-white shadow-sm group-hover:scale-110 transition-transform">
+                  <RefreshCw className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none mb-1">Preview Mode</p>
+                  <p className="text-sm font-bold text-white tracking-tight">{isToolsSite ? 'Switch to Portal' : 'Switch to Tools'}</p>
+                </div>
+              </div>
+              <ArrowRight className="w-4 h-4 text-indigo-400 group-hover:translate-x-1 transition-transform" />
+            </button>
+          </div>
+          
+          {!isToolsSite && <SidebarItem icon={Calendar} label="Calendar" active={activeTab === 'calendar'} onClick={() => setActiveTab('calendar')} />}
+          
+          {profile?.role === 'client' && clientReflectionTemplate?.isEnabled && !isToolsSite && (
             <SidebarItem 
               icon={Brain} 
               label="Session Reflection" 
@@ -3509,25 +3466,62 @@ export default function App() {
             />
           )}
           <SidebarItem icon={Wrench} label="Tools Library" active={activeTab === 'tools'} onClick={() => setActiveTab('tools')} />
-          {profile?.role === 'coach' && (
+          
+          {isToolsSite && (
+            <SidebarItem icon={ShieldCheck} label="Privacy Vault" active={activeTab === 'privacy'} onClick={() => setActiveTab('privacy')} />
+          )}
+
+          {!isToolsSite && profile?.role === 'coach' && (
             <>
               <SidebarItem icon={Users} label="Clients" active={activeTab === 'clients'} onClick={() => setActiveTab('clients')} />
               <SidebarItem icon={Library} label="Library" active={activeTab === 'library'} onClick={() => setActiveTab('library')} />
             </>
           )}
-          <SidebarItem 
-            icon={MessageSquare} 
-            label="Messages" 
-            active={activeTab === 'messages'} 
-            onClick={() => setActiveTab('messages')} 
-            badge={messages.filter(m => m.receiverUid === user?.uid && !m.isRead).length || undefined}
-          />
-          <SidebarItem icon={FileText} label="Documents" active={activeTab === 'documents'} onClick={() => setActiveTab('documents')} />
-          <SidebarItem icon={Bell} label="Reminders" active={activeTab === 'reminders'} onClick={() => setActiveTab('reminders')} />
+          
+          {!isToolsSite && (
+            <>
+              <SidebarItem 
+                icon={MessageSquare} 
+                label="Messages" 
+                active={activeTab === 'messages'} 
+                onClick={() => setActiveTab('messages')} 
+                badge={messages.filter(m => m.receiverUid === user?.uid && !m.isRead).length || undefined}
+              />
+              <SidebarItem icon={FileText} label="Documents" active={activeTab === 'documents'} onClick={() => setActiveTab('documents')} />
+              <SidebarItem icon={Bell} label="Reminders" active={activeTab === 'reminders'} onClick={() => setActiveTab('reminders')} />
+            </>
+          )}
+          
           <SidebarItem icon={Settings} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
         </nav>
 
-        <div className="mt-auto pt-6 border-t border-slate-800/50">
+        <div className={`mt-auto pt-6 ${isToolsSite ? 'px-4' : ''} border-t border-slate-800/50 pb-6`}>
+          {isToolsSite && (
+            <div className="p-4 rounded-2xl bg-indigo-500/5 border border-indigo-500/10 mb-6 group hover:border-indigo-500/30 transition-all">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 p-0.5 bg-brand-focus rounded-full border border-slate-700 overflow-hidden shadow-sm">
+                  <img src="https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png" className="w-full h-full object-cover" alt="Coach Logo" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white leading-tight">Mr. Lee Teaches</h4>
+                  <p className="text-[10px] text-indigo-400 font-medium">Coaching Services</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+                Finding these tools helpful? Visit my site for more resources, blog posts, or to request a Discovery Call to work together.
+              </p>
+              <a 
+                href="https://mrleeteaches.com" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="group flex items-center justify-between py-2 text-brand-accent text-xs font-bold hover:text-white transition-colors"
+              >
+                Visit Website
+                <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+              </a>
+            </div>
+          )}
+
           <div className="flex items-center gap-3 px-2 mb-6">
             <div className="w-10 h-10 rounded-full bg-brand-surface flex items-center justify-center text-brand-accent font-bold overflow-hidden border border-slate-700">
               {profile?.photoURL ? (
@@ -3551,32 +3545,50 @@ export default function App() {
         </div>
       </aside>
 
-      {/* Mobile Header */}
+      {/* Mobile Top Bar */}
       <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-[#0b1121] border-b border-slate-800/50 flex items-center justify-between px-4 z-50">
-        <button 
-          onClick={() => setActiveTab('dashboard')}
-          className="flex items-center gap-2 hover:opacity-80 transition-opacity text-left focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-lg"
-        >
-          <img 
-            src="/logo.png" 
-            alt="Logo" 
-            className="w-8 h-8 object-contain rounded-lg"
-            onError={(e) => {
-              e.currentTarget.src = 'https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png';
-            }}
-          />
-          <div>
-            <span className="font-bold text-white block leading-none">MrLeeTeaches</span>
-            <span className="text-brand-accent text-[8px] font-bold uppercase tracking-wider">Neurodiversity Coaching</span>
+        {isToolsSite ? (
+          <div className="flex items-center gap-4 w-full">
+            <button 
+              onClick={() => setSidebarOpen(!sidebarOpen)} 
+              aria-label="Toggle menu"
+              className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400"
+            >
+              {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+            <div className="flex flex-col min-w-0">
+              <h1 className="text-lg font-black text-white tracking-tight leading-none mb-0.5">Tools Library</h1>
+              <p className="text-[9px] text-slate-400 font-medium truncate italic">Custom Built Apps</p>
+            </div>
           </div>
-        </button>
-        <button 
-          onClick={() => setSidebarOpen(!sidebarOpen)} 
-          aria-label="Toggle menu"
-          className="p-2 text-slate-400 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-lg"
-        >
-          {sidebarOpen ? <X /> : <Menu />}
-        </button>
+        ) : (
+          <>
+            <button 
+              onClick={() => setActiveTab('dashboard')}
+              className="flex items-center gap-2 hover:opacity-80 transition-opacity text-left focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-lg"
+            >
+              <img 
+                src="/logo.png" 
+                alt="Logo" 
+                className="w-8 h-8 object-contain rounded-lg"
+                onError={(e) => {
+                  e.currentTarget.src = 'https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png';
+                }}
+              />
+              <div>
+                <span className="font-bold text-white block leading-none">MrLeeTeaches</span>
+                <span className="text-brand-accent text-[8px] font-bold uppercase tracking-wider">Neurodiversity Coaching</span>
+              </div>
+            </button>
+            <button 
+              onClick={() => setSidebarOpen(!sidebarOpen)} 
+              aria-label="Toggle menu"
+              className="p-2 text-slate-400 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-lg"
+            >
+              {sidebarOpen ? <X /> : <Menu />}
+            </button>
+          </>
+        )}
       </div>
 
       {/* Mobile Sidebar Overlay */}
@@ -3595,34 +3607,84 @@ export default function App() {
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed inset-y-0 left-0 w-72 bg-[#0b1121] z-50 p-6 lg:hidden border-r border-slate-800/50"
+              className="fixed inset-y-0 left-0 w-72 bg-[#0b1121] z-50 p-6 lg:hidden border-r border-slate-800/50 flex flex-col overflow-y-auto"
             >
-              <div className="flex items-center justify-between mb-10">
-                <button 
-                  onClick={() => { setActiveTab('dashboard'); setSidebarOpen(false); }}
-                  className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-xl"
-                >
-                  <img 
-                    src="/logo.png" 
-                    alt="Logo" 
-                    className="w-10 h-10 object-contain rounded-xl"
-                    onError={(e) => {
-                      e.currentTarget.src = 'https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png';
-                    }}
-                  />
-                  <div>
-                    <h1 className="text-xl font-bold text-white tracking-tight leading-none">MrLeeTeaches</h1>
-                    <p className="text-brand-accent text-[10px] font-bold uppercase tracking-wider mt-1">Neurodiversity Coaching</p>
+              <div className="flex items-center justify-between mb-8">
+                {isToolsSite ? (
+                  <div className="flex items-start">
+                    <div className="w-12 h-12 rounded-full border border-slate-700 overflow-hidden shrink-0 mr-3 shadow-sm bg-brand-focus">
+                      <img 
+                        src="https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png" 
+                        alt="Mr. Lee Teaches Logo" 
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    
+                    <div className="flex flex-col min-w-0 pt-0.5">
+                      <h1 className="text-lg font-bold text-white tracking-tight leading-none mb-2">MrLeeTeaches</h1>
+                      
+                      <div className="flex flex-col gap-1.5 text-[11px] font-medium text-slate-300">
+                        <span className="truncate block">
+                          <span aria-hidden="true" className="mr-0.5">💬</span> Neurodivergent Advocate
+                        </span>
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span><span aria-hidden="true" className="mr-0.5">🗣️</span> Speaker</span>
+                          <span className="text-slate-600" aria-hidden="true">|</span>
+                          <span><span aria-hidden="true" className="mr-0.5">🤯</span> Consultant</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </button>
-                <button onClick={() => setSidebarOpen(false)} className="p-2 text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-lg">
-                  <X />
+                ) : (
+                  <button 
+                    onClick={() => { setActiveTab('dashboard'); setSidebarOpen(false); }}
+                    className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left outline-none"
+                  >
+                    <img src="/logo.png" className="w-10 h-10 object-contain rounded-xl" alt="Logo" />
+                    <div>
+                      <h1 className="text-lg font-bold text-white tracking-tight leading-none">MrLeeTeaches</h1>
+                      <p className="text-brand-accent text-[10px] font-bold uppercase tracking-wider mt-1">Coaching Portal</p>
+                    </div>
+                  </button>
+                )}
+                <button onClick={() => setSidebarOpen(false)} className="p-2 text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-accent rounded-lg self-start">
+                  <X className="w-6 h-6" />
                 </button>
               </div>
-              <nav className="space-y-2">
-                <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setSidebarOpen(false); }} />
-                <SidebarItem icon={Calendar} label="Calendar" active={activeTab === 'calendar'} onClick={() => { setActiveTab('calendar'); setSidebarOpen(false); }} />
-                {profile?.role === 'client' && clientReflectionTemplate?.isEnabled && (
+
+              <nav className="flex-1 space-y-2">
+                {!isToolsSite ? (
+                  <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setSidebarOpen(false); }} />
+                ) : (
+                  <SidebarItem icon={Zap} label="Getting Started" active={activeTab === 'dashboard'} onClick={() => { setActiveTab('dashboard'); setSidebarOpen(false); }} />
+                )}
+
+                <div className="py-2">
+                  <button 
+                    onClick={() => {
+                      const nextView = isToolsSite ? 'portal' : 'tools';
+                      setForcedSiteView(nextView);
+                      setActiveTab(nextView === 'tools' ? 'tools' : 'dashboard');
+                      setSidebarOpen(false);
+                    }}
+                    className="w-full group flex items-center justify-between px-4 py-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all text-left"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="p-1.5 bg-indigo-500 rounded-lg text-white shadow-sm group-hover:scale-110 transition-transform">
+                        <RefreshCw className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none mb-1">Preview Mode</p>
+                        <p className="text-sm font-bold text-white tracking-tight">{isToolsSite ? 'Switch to Portal' : 'Switch to Tools'}</p>
+                      </div>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-indigo-400 group-hover:translate-x-1 transition-transform" />
+                  </button>
+                </div>
+
+                {!isToolsSite && <SidebarItem icon={Calendar} label="Calendar" active={activeTab === 'calendar'} onClick={() => { setActiveTab('calendar'); setSidebarOpen(false); }} />}
+                
+                {profile?.role === 'client' && clientReflectionTemplate?.isEnabled && !isToolsSite && (
                   <SidebarItem 
                     icon={Brain} 
                     label="Session Reflection" 
@@ -3631,26 +3693,81 @@ export default function App() {
                     badge={clientReflections.some(r => r.status === 'draft') ? 1 : undefined}
                   />
                 )}
+                
                 <SidebarItem icon={Wrench} label="Tools Library" active={activeTab === 'tools'} onClick={() => { setActiveTab('tools'); setSidebarOpen(false); }} />
-                {profile?.role === 'coach' && (
+                
+                {isToolsSite && (
+                  <SidebarItem icon={ShieldCheck} label="Privacy Vault" active={activeTab === 'privacy'} onClick={() => { setActiveTab('privacy'); setSidebarOpen(false); }} />
+                )}
+
+                {!isToolsSite && profile?.role === 'coach' && (
                   <>
                     <SidebarItem icon={Users} label="Clients" active={activeTab === 'clients'} onClick={() => { setActiveTab('clients'); setSidebarOpen(false); }} />
                     <SidebarItem icon={Library} label="Library" active={activeTab === 'library'} onClick={() => { setActiveTab('library'); setSidebarOpen(false); }} />
                   </>
                 )}
-                <SidebarItem 
-                  icon={MessageSquare} 
-                  label="Messages" 
-                  active={activeTab === 'messages'} 
-                  onClick={() => { setActiveTab('messages'); setSidebarOpen(false); }} 
-                  badge={messages.filter(m => m.receiverUid === user?.uid && !m.isRead).length || undefined}
-                />
-                <SidebarItem icon={FileText} label="Documents" active={activeTab === 'documents'} onClick={() => { setActiveTab('documents'); setSidebarOpen(false); }} />
-                <SidebarItem icon={Bell} label="Reminders" active={activeTab === 'reminders'} onClick={() => { setActiveTab('reminders'); setSidebarOpen(false); }} />
+
+                {!isToolsSite && (
+                  <>
+                    <SidebarItem 
+                      icon={MessageSquare} 
+                      label="Messages" 
+                      active={activeTab === 'messages'} 
+                      onClick={() => { setActiveTab('messages'); setSidebarOpen(false); }} 
+                      badge={messages.filter(m => m.receiverUid === user?.uid && !m.isRead).length || undefined}
+                    />
+                    <SidebarItem icon={FileText} label="Documents" active={activeTab === 'documents'} onClick={() => { setActiveTab('documents'); setSidebarOpen(false); }} />
+                    <SidebarItem icon={Bell} label="Reminders" active={activeTab === 'reminders'} onClick={() => { setActiveTab('reminders'); setSidebarOpen(false); }} />
+                  </>
+                )}
+
                 <SidebarItem icon={Settings} label="Settings" active={activeTab === 'settings'} onClick={() => { setActiveTab('settings'); setSidebarOpen(false); }} />
               </nav>
-              <div className="absolute bottom-6 left-6 right-6 pt-6 border-t border-slate-800">
-                <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 text-rose-400 bg-rose-400/5 rounded-xl">
+
+              <div className="mt-8 pt-6 border-t border-slate-800/50 space-y-6">
+                {isToolsSite && (
+                  <div className="p-4 rounded-2xl bg-indigo-500/5 border border-indigo-500/10 mb-2 group hover:border-indigo-500/30 transition-all">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-10 h-10 p-0.5 bg-brand-focus rounded-full border border-slate-700 overflow-hidden shadow-sm">
+                        <img src="https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png" className="w-full h-full object-cover" alt="Coach Logo" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white leading-tight">Mr. Lee Teaches</h4>
+                        <p className="text-[10px] text-indigo-400 font-medium">Coaching Services</p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+                      Finding these tools helpful? Visit my site for more resources, blog posts, or to request a Discovery Call to work together.
+                    </p>
+                    <a 
+                      href="https://mrleeteaches.com" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="group flex items-center justify-between py-2 text-brand-accent text-xs font-bold hover:text-white transition-colors"
+                    >
+                      Visit Website
+                      <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+                    </a>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3 mb-6 px-2">
+                  <div className="w-10 h-10 rounded-full bg-brand-surface flex items-center justify-center text-brand-accent font-bold overflow-hidden border border-slate-700">
+                    {profile?.photoURL ? (
+                      <img src={profile.photoURL} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      user.displayName?.[0] || user.email?.[0].toUpperCase()
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-white truncate">{user.displayName || 'User'}</p>
+                    <p className="text-xs text-slate-500 truncate capitalize">{profile?.role}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-rose-400 hover:bg-rose-400/5 rounded-xl transition-all"
+                >
                   <LogOut className="w-5 h-5" />
                   <span className="font-medium">Sign Out</span>
                 </button>
@@ -3731,6 +3848,7 @@ export default function App() {
           user={user} 
           isOpen={showABCReframingModal} 
           onClose={() => setShowABCReframingModal(false)} 
+          isToolsSite={isToolsSite}
         />
       )}
 
@@ -4370,6 +4488,197 @@ const ReflectionResponseViewer = ({ reflections }: { reflections: Reflection[] }
     </Card>
   );
 };
+
+const ToolModal = ({ 
+  isOpen, 
+  onClose, 
+  title, 
+  children,
+  type = 'basic'
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  title: string; 
+  children: React.ReactNode;
+  type?: 'basic' | 'advanced';
+}) => (
+  <AnimatePresence>
+    {isOpen && (
+      <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 md:p-8">
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+          className="absolute inset-0 bg-[#0b1121]/90 backdrop-blur-md"
+        />
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.9, y: 20 }}
+          className="relative w-full max-w-4xl bg-brand-surface border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        >
+          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-brand-surface/50">
+            <div className="flex items-center gap-3">
+              <h3 className="text-xl font-bold text-white tracking-tight">{title}</h3>
+              <Badge variant={type === 'advanced' ? 'success' : 'default'}>
+                {type === 'advanced' ? 'Advanced Tool' : 'Basic Tool'}
+              </Badge>
+              {type === 'advanced' && (
+                <div className="flex items-center gap-1.5 text-xs text-brand-accent font-medium">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Secure Sync Active</span>
+                </div>
+              )}
+            </div>
+            <button 
+              onClick={onClose}
+              className="p-2 text-slate-400 hover:text-white bg-slate-800/50 hover:bg-slate-700 rounded-xl transition-all"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-6 md:p-8 no-scrollbar">
+            {children}
+          </div>
+        </motion.div>
+      </div>
+    )}
+  </AnimatePresence>
+);
+
+const GettingStartedView = ({ isToolsSite, setActiveTab }: { isToolsSite: boolean; setActiveTab: (tab: string) => void }) => (
+  <div className="max-w-4xl mx-auto space-y-12 py-8">
+    <header className="text-center space-y-4">
+      <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-brand-accent/10 border border-brand-accent/20 text-brand-accent mb-4">
+        <Zap className="w-10 h-10" />
+      </div>
+      <h1 className="text-4xl font-bold text-white tracking-tight">
+        {isToolsSite ? "Welcome to the Tools Library" : "Welcome to Your Portal"}
+      </h1>
+      <p className="text-xl text-slate-400 max-w-2xl mx-auto">
+        {isToolsSite 
+          ? "A collection of cognitive tools designed to help you bypass executive dysfunction." 
+          : "Your space to manage sessions, track progress, and access custom coaching tools."}
+      </p>
+    </header>
+
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <Card title={isToolsSite ? "How to Use" : "Next Steps"} subtitle="Quick guide to get moving">
+        <div className="space-y-6">
+          <div className="flex gap-4">
+            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-white font-bold shrink-0">1</div>
+            <div>
+              <p className="font-bold text-white mb-1">Explore the Library</p>
+              <p className="text-sm text-slate-400 leading-relaxed">Head to the Tools Library to see a growing list of interactive applications built for neurodivergent minds.</p>
+            </div>
+          </div>
+          <div className="flex gap-4">
+            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-white font-bold shrink-0">2</div>
+            <div>
+              <p className="font-bold text-white mb-1">Launch in Focus Mode</p>
+              <p className="text-sm text-slate-400 leading-relaxed">Click any tool to launch it in a distraction-free modal. Basic tools stay in your browser; Advanced tools sync with your account.</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setActiveTab('tools')}
+            className="w-full mt-4 py-4 bg-brand-accent text-white rounded-2xl font-bold hover:bg-brand-secondary transition-all flex items-center justify-center gap-2"
+          >
+            Go to Library <ArrowRight className="w-5 h-5" />
+          </button>
+        </div>
+      </Card>
+
+      <Card title="Philosophy" subtitle="Why I build these tools">
+        <div className="space-y-4 text-slate-400 text-sm leading-relaxed">
+          <p>
+            As a neurodivergent professional, I know that standard "productivity apps" often add more friction than they solve. 
+          </p>
+          <p>
+            The tools here are built with the **Neurodivergent First** principle—minimizing executive function tax, reducing demand avoidance, and providing clear visual anchors.
+          </p>
+          <div className="pt-4 flex flex-wrap gap-2">
+            <Badge variant="success">Privacy-Focused</Badge>
+            <Badge variant="success">Zero Friction</Badge>
+            <Badge variant="success">Evidence-Based</Badge>
+          </div>
+        </div>
+      </Card>
+    </div>
+
+    <div className="p-8 rounded-bento bg-brand-accent/5 border border-brand-accent/10 text-center">
+      <Brain className="w-8 h-8 text-brand-accent mx-auto mb-4" />
+      <h3 className="text-xl font-bold text-white mb-2 underline decoration-brand-accent/30 decoration-4 underline-offset-4">Have a Tool Idea?</h3>
+      <p className="text-slate-400 text-sm mb-6 max-w-lg mx-auto leading-relaxed">
+        I am constantly building new tools to solve specific client challenges. If you have a workflow you'd like to automate or a stuck point you'd like to deconstruct, let me know.
+      </p>
+      <a 
+        href="mailto:coach@mrleeteaches.com?subject=Tool%20Idea"
+        className="inline-flex items-center gap-2 text-brand-accent font-bold hover:text-brand-secondary transition-all"
+      >
+        Request a Feature <MessageSquare className="w-4 h-4" />
+      </a>
+    </div>
+  </div>
+);
+
+const PrivacyVaultView = () => (
+  <div className="max-w-4xl mx-auto space-y-12 py-8">
+    <header className="text-center space-y-4">
+      <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 mb-4">
+        <ShieldCheck className="w-10 h-10" />
+      </div>
+      <h1 className="text-4xl font-bold text-white tracking-tight">The Privacy Vault</h1>
+      <p className="text-xl text-slate-400 max-w-2xl mx-auto">
+        Your data security and ethical boundaries are the foundation of this platform.
+      </p>
+    </header>
+
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <div className="space-y-6">
+        <div className="p-6 bg-brand-surface border border-slate-800 rounded-2xl">
+          <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-500 mb-4">
+            <ShieldCheck className="w-6 h-6" />
+          </div>
+          <h3 className="text-lg font-bold text-white mb-2">I build the tools, I don't read your data.</h3>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            I built this system to empower your brain, not to track it. While "Advanced" tools sync to the database so you can access them across devices, I do not monitor individual data logs for non-clients.
+          </p>
+        </div>
+        <div className="p-6 bg-brand-surface border border-slate-800 rounded-2xl">
+          <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-500 mb-4">
+            <LogOut className="w-6 h-6" />
+          </div>
+          <h3 className="text-lg font-bold text-white mb-2">Pure Client-Side Option</h3>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            "Basic" tools do not send any data to my servers. Everything stays in your browser session and is cleared when you close the tab.
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-6">
+        <div className="p-6 bg-brand-surface border border-slate-800 rounded-2xl">
+          <div className="w-10 h-10 bg-brand-accent/10 rounded-xl flex items-center justify-center text-brand-accent mb-4">
+            <CheckCircle2 className="w-6 h-6" />
+          </div>
+          <h3 className="text-lg font-bold text-white mb-2">Bank-Level Encryption</h3>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            All data synced to the coaching portal is encrypted at rest using AES-256 and during transport using SSL/TLS.
+          </p>
+        </div>
+        <div className="p-6 bg-brand-surface border border-slate-800 rounded-2xl">
+          <div className="w-10 h-10 bg-rose-500/10 rounded-xl flex items-center justify-center text-rose-500 mb-4">
+            <Trash2 className="w-6 h-6" />
+          </div>
+          <h3 className="text-lg font-bold text-white mb-2">Right to Erasure</h3>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            You can delete your accounts or specific data points at any time. When you click delete, it is gone from the primary database instantly.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
 const ReflectionEntryView = ({ 
   template, 
@@ -7350,7 +7659,7 @@ const TOOLS = [
   }
 ];
 
-function ToolsLibraryView({ setActiveTab, onOpenABC }: { setActiveTab?: (tab: string) => void; onOpenABC?: () => void }) {
+function ToolsLibraryView({ setActiveTab, onOpenABC, onOpenTool }: { setActiveTab?: (tab: string) => void; onOpenABC?: () => void; onOpenTool?: (name: string, type: 'basic' | 'advanced', component: React.ReactNode) => void }) {
   const [expandedIndices, setExpandedIndices] = useState<number[]>([]);
 
   const toggleExpand = (index: number) => {
@@ -7419,9 +7728,14 @@ function ToolsLibraryView({ setActiveTab, onOpenABC }: { setActiveTab?: (tab: st
             {tool.type === 'internal' ? (
               <button 
                 onClick={() => {
-                  if (tool.tab) setActiveTab?.(tool.tab);
-                  if (tool.name === 'ABC Cognitive Reframing' && onOpenABC) {
-                    onOpenABC();
+                  if (tool.name === 'ABC Cognitive Reframing') {
+                    if (onOpenTool) {
+                      onOpenTool('ABC Cognitive Reframing', 'basic', <ABCWorksheet isPrivate={true} onSave={() => {}} />);
+                    } else if (onOpenABC) {
+                      onOpenABC();
+                    }
+                  } else if (tool.tab) {
+                    setActiveTab?.(tool.tab);
                   } else if (tool.action) {
                     tool.action();
                   }
