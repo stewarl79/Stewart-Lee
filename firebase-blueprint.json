@@ -256,6 +256,19 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["clientUid", "coachUid", "situation", "thoughts", "consequences", "createdAt"]
+    },
+    "BrainDump": {
+      "title": "Brain Dump",
+      "description": "Raw thoughts dumped by the user for processing.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the user who created it" },
+        "userEmail": { "type": "string", "format": "email", "description": "Email of the user" },
+        "text": { "type": "string", "description": "The raw text dump" },
+        "isProcessed": { "type": "boolean", "description": "Whether it has been included in a daily digest" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation time" }
+      },
+      "required": ["userId", "userEmail", "text", "createdAt"]
     }
   },
   "firestore": {
@@ -322,6 +335,10 @@
     "/abc_reframing/{reframingId}": {
       "schema": "ABCReframing",
       "description": "Cognitive reframing logs"
+    },
+    "/brain_dumps/{dumpId}": {
+      "schema": "BrainDump",
+      "description": "Raw brain dumps"
     }
   }
 }

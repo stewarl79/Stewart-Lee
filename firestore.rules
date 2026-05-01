@@ -311,32 +311,6 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
-    function isValidLibraryGoal(data) {
-      return data.keys().hasAll(['text', 'coachUid']) &&
-             hasOnlyAllowedFields(['text', 'coachUid', 'usageCount']) &&
-             data.text is string && data.text.size() < 500 &&
-             data.coachUid == request.auth.uid;
-    }
-
-    function isValidLibraryObjective(data) {
-      return data.keys().hasAll(['text', 'goalText', 'coachUid']) &&
-             hasOnlyAllowedFields(['text', 'goalText', 'coachUid', 'usageCount']) &&
-             data.text is string && data.text.size() < 1000 &&
-             data.goalText is string && data.goalText.size() < 500 &&
-             data.coachUid == request.auth.uid;
-    }
-
-    function isValidTreatmentPlan(data) {
-      return data.keys().hasAll(['clientUid', 'coachUid', 'goalTitle', 'objectives', 'status', 'createdAt']) &&
-             hasOnlyAllowedFields(['clientUid', 'coachUid', 'goalTitle', 'objectives', 'status', 'createdAt', 'updatedAt']) &&
-             data.clientUid is string &&
-             data.coachUid == request.auth.uid &&
-             data.goalTitle is string && data.goalTitle.size() < 500 &&
-             data.objectives is list &&
-             data.status in ['active', 'completed', 'archived'] &&
-             data.createdAt is timestamp;
-    }
-
     function isValidABCReframing(data) {
       return data.keys().hasAll(['clientUid', 'coachUid', 'situation', 'thoughts', 'consequences', 'createdAt']) &&
              hasOnlyAllowedFields(['clientUid', 'coachUid', 'situation', 'thoughts', 'consequences', 'reframe', 'createdAt', 'updatedAt']) &&
@@ -349,23 +323,26 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
+    function isValidBrainDump(data) {
+      return data.keys().hasAll(['userId', 'userEmail', 'text', 'createdAt']) &&
+             hasOnlyAllowedFields(['userId', 'userEmail', 'text', 'isProcessed', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             isValidEmail(data.userEmail) &&
+             data.text is string && data.text.size() < 10000 &&
+             (!('isProcessed' in data) || data.isProcessed is bool) &&
+             data.createdAt is timestamp;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
 
     match /users/{uid} {
-      // Coaches can read all users. Clients can read themselves and the coach profile.
       allow read: if isAuthenticated() && (isOwner(uid) || isCoach() || resource.data.email == "msustewart@gmail.com");
       
-      // On create:
-      // 1. User must be authenticated and owner of the document.
-      // 2. Role must be 'client' unless they are the default admin.
       allow create: if isAuthenticated() && isOwner(uid) && isValidUser(request.resource.data, uid) &&
                     (request.resource.data.role == 'client' || request.auth.token.email == "msustewart@gmail.com");
       
-      // On update:
-      // 1. Owner can update their own profile but CANNOT change their role or uid.
-      // 2. Coach can update client profiles.
       allow update: if isAuthenticated() && 
                     ((isOwner(uid) && 
                       request.resource.data.role == resource.data.role && 
@@ -374,45 +351,36 @@ service cloud.firestore {
     }
 
     match /appointments/{appointmentId} {
-      // Coaches can see all appointments. Clients can only see their own.
       allow read: if isAuthenticated() && (isCoach() || request.auth.token.email == resource.data.clientEmail);
       
-      // Only coaches can manage appointments.
       allow create: if isCoach() && isValidAppointment(request.resource.data);
       allow update: if isCoach() && isValidAppointment(request.resource.data);
       allow delete: if isCoach();
     }
 
     match /documents/{documentId} {
-      // Coaches can see all shared documents. Clients can only see documents shared with them.
       allow read: if isAuthenticated() && (isCoach() || request.auth.token.email == resource.data.sharedWithEmail);
       
-      // Only coaches can manage documents.
       allow create: if isCoach() && isValidDocument(request.resource.data);
       allow update: if isCoach() && isValidDocument(request.resource.data);
       allow delete: if isCoach();
     }
 
     match /requests/{requestId} {
-      // Coaches can see all requests. Clients can only see their own.
       allow read: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.uid);
       
-      // Clients can create requests.
       allow create: if isAuthenticated() && isValidRequest(request.resource.data) && request.resource.data.uid == request.auth.uid;
       
-      // Only coaches can update requests (approve/reject).
       allow update: if isCoach() && isValidRequest(request.resource.data);
       allow delete: if isCoach();
     }
 
     match /coach_notes/{clientUid} {
-      // ONLY coaches can read or write these notes.
       allow read: if isCoach();
       allow write: if isCoach() && isValidCoachNote(request.resource.data);
     }
 
     match /private_notes/{noteId} {
-      // ONLY coaches can read or write these notes.
       allow read: if isCoach();
       allow create: if isCoach() && isValidPrivateNote(request.resource.data);
       allow update: if isCoach() && isValidPrivateNote(request.resource.data);
@@ -420,62 +388,50 @@ service cloud.firestore {
     }
 
     match /goals/{goalId} {
-      // Coaches can see all goals. Clients can only see their own.
       allow read: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.clientUid);
       
-      // Coaches and owners can manage goals.
       allow create: if isAuthenticated() && isValidGoal(request.resource.data) && (isCoach() || request.auth.uid == request.resource.data.clientUid);
       allow update: if isAuthenticated() && isValidGoal(request.resource.data) && (isCoach() || request.auth.uid == resource.data.clientUid);
       allow delete: if isCoach() || (isAuthenticated() && request.auth.uid == resource.data.clientUid);
     }
 
     match /habits/{habitId} {
-      // Coaches can see all habits. Clients can only see their own.
       allow read: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.clientUid);
       
-      // Coaches and owners can manage habits.
       allow create: if isAuthenticated() && isValidHabit(request.resource.data) && (isCoach() || request.auth.uid == request.resource.data.clientUid);
       allow update: if isAuthenticated() && isValidHabit(request.resource.data) && (isCoach() || request.auth.uid == resource.data.clientUid);
       allow delete: if isCoach() || (isAuthenticated() && request.auth.uid == resource.data.clientUid);
     }
 
     match /subjective_metrics/{metricId} {
-      // Coaches can see all metrics. Clients can only see their own.
       allow read: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.clientUid);
       
-      // Coaches and owners can manage metrics.
       allow create: if isAuthenticated() && isValidSubjectiveMetric(request.resource.data) && (isCoach() || request.auth.uid == request.resource.data.clientUid);
-      allow update: if isAuthenticated() && isValidSubjectiveMetric(request.resource.data) && (isCoach() || request.auth.uid == resource.data.clientUid);
+      allow update: if isAuthenticated() && isValidSubjectiveMetric(request.resource.data) && (isCoach() || request.auth.uid == request.resource.data.clientUid);
       allow delete: if isCoach() || (isAuthenticated() && request.auth.uid == resource.data.clientUid);
     }
 
     match /messages/{messageId} {
-      // Users can read messages where they are either sender or receiver.
       allow read: if isAuthenticated() && (request.auth.uid == resource.data.senderUid || request.auth.uid == resource.data.receiverUid);
       
-      // Users can create messages if they are the sender.
       allow create: if isAuthenticated() && isValidMessage(request.resource.data);
       
-      // Receivers can mark messages as read.
       allow update: if isAuthenticated() && request.auth.uid == resource.data.receiverUid && 
                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']) &&
                     request.resource.data.isRead == true;
     }
 
     match /settings/sync_config {
-      // Coaches can read and write sync settings.
       allow read: if isCoach();
       allow write: if isCoach() && isValidSyncConfig(request.resource.data);
     }
 
     match /reflection_templates/{templateId} {
-      // Coaches can manage all templates. Clients can read templates assigned to them.
       allow read: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.clientUid);
       allow write: if isCoach() && isValidReflectionTemplate(request.resource.data);
     }
 
     match /reflections/{reflectionId} {
-      // Coaches can read all reflections. Clients can read and write their own.
       allow read: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.clientUid);
       allow create: if isAuthenticated() && isValidReflection(request.resource.data);
       allow update: if isAuthenticated() && request.auth.uid == resource.data.clientUid && isValidReflection(request.resource.data);
@@ -503,8 +459,15 @@ service cloud.firestore {
     match /abc_reframing/{reframingId} {
       allow read: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.clientUid);
       allow create: if isAuthenticated() && isValidABCReframing(request.resource.data) && (isCoach() || request.auth.uid == request.resource.data.clientUid);
-      allow update: if isAuthenticated() && isValidABCReframing(request.resource.data) && (isCoach() || request.auth.uid == resource.data.clientUid);
+      allow update: if isAuthenticated() && isValidABCReframing(request.resource.data) && (isCoach() || request.auth.uid == request.resource.data.clientUid);
       allow delete: if isCoach() || (isAuthenticated() && request.auth.uid == resource.data.clientUid);
+    }
+
+    match /brain_dumps/{dumpId} {
+      allow read: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.userId);
+      allow create: if isAuthenticated() && isValidBrainDump(request.resource.data);
+      allow update: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.userId) && isValidBrainDump(request.resource.data);
+      allow delete: if isAuthenticated() && (isCoach() || request.auth.uid == resource.data.userId);
     }
   }
 }

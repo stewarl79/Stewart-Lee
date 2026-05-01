@@ -23,6 +23,7 @@ import {
   Menu,
   X,
   Edit2,
+  User as UserIcon,
   UserPlus,
   RefreshCw,
   Share2,
@@ -42,7 +43,8 @@ import {
   Zap,
   Layers,
   Hourglass,
-  Brain
+  Brain,
+  BrainCircuit
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
@@ -86,6 +88,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 import { ABCWorksheet } from './components/tools/ABCWorksheet';
+import { BrainDump } from './components/tools/BrainDump';
 
 // --- Utility ---
 function cn(...inputs: ClassValue[]) {
@@ -2479,6 +2482,8 @@ export default function App() {
   const [showLateNoticeModal, setShowLateNoticeModal] = useState(false);
   const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [showABCReframingModal, setShowABCReframingModal] = useState(false);
+  const [showBrainDumpModal, setShowBrainDumpModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
     typeof Notification !== 'undefined' ? Notification.permission : 'default'
   );
@@ -2598,6 +2603,7 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
+        setShowAuthModal(false);
         const docRef = doc(db, 'users', u.uid);
         unsubProfile = onSnapshot(docRef, async (docSnap) => {
           if (docSnap.exists()) {
@@ -3072,132 +3078,23 @@ export default function App() {
     );
   }
 
-  if (!user) {
+  if (!user && !isToolsSite) {
     return (
       <div className="min-h-screen bg-brand-focus flex items-center justify-center p-4">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-md w-full bg-brand-surface border border-slate-800/50 rounded-3xl p-8 shadow-2xl"
-        >
-          <div className="flex flex-col items-center text-center">
-            <div className="w-16 h-16 mb-6">
-              <img 
-                src="/logo.png" 
-                alt="MrLeeTeaches Logo" 
-                className="w-full h-full object-contain rounded-2xl"
-                onError={(e) => {
-                  e.currentTarget.src = 'https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png';
-                }}
-              />
-            </div>
-            <h1 className="text-3xl font-bold text-white mb-1 tracking-tight">MrLeeTeaches</h1>
-            <p className="text-brand-accent font-medium text-sm mb-4">Neurodiversity Coaching</p>
-            <p className="text-slate-400 mb-8">
-              {authMode === 'login' && 'Welcome back! Please sign in to your account.'}
-              {authMode === 'signup' && 'Join the coaching portal to get started.'}
-              {authMode === 'forgot' && 'Enter your email to reset your password.'}
-            </p>
-            
-            {authError && (
-              <div className="w-full bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm p-3 rounded-xl mb-6">
-                {authError}
-              </div>
-            )}
-
-            {authMessage && (
-              <div className="w-full bg-brand-accent/10 border border-brand-accent/20 text-brand-accent text-sm p-3 rounded-xl mb-6">
-                {authMessage}
-              </div>
-            )}
-
-            <form onSubmit={handleEmailAuth} className="w-full space-y-4 mb-6">
-              {authMode === 'signup' && (
-                <input
-                  type="text"
-                  placeholder="Full Name"
-                  required
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
-                />
-              )}
-              <input
-                type="email"
-                placeholder="Email Address"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
-              />
-              {authMode !== 'forgot' && (
-                <input
-                  type="password"
-                  placeholder="Password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
-                />
-              )}
-              <button
-                type="submit"
-                className="w-full bg-brand-accent text-white font-semibold py-3 rounded-xl hover:bg-brand-secondary transition-all shadow-lg shadow-brand-accent/20 focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 focus:ring-offset-brand-surface"
-              >
-                {authMode === 'login' && 'Sign In'}
-                {authMode === 'signup' && 'Create Account'}
-                {authMode === 'forgot' && 'Send Reset Link'}
-              </button>
-            </form>
-
-            {authMode === 'login' && (
-              <>
-                <div className="w-full flex items-center gap-4 mb-6">
-                  <div className="flex-1 h-px bg-slate-800" />
-                  <span className="text-xs text-slate-500 uppercase font-bold">Or</span>
-                  <div className="flex-1 h-px bg-slate-800" />
-                </div>
-
-                <button
-                  onClick={handleGoogleLogin}
-                  className="w-full flex items-center justify-center gap-3 bg-white text-slate-900 font-semibold py-3 rounded-xl hover:bg-slate-100 transition-all duration-200 shadow-lg shadow-white/5 focus:outline-none focus:ring-2 focus:ring-brand-accent"
-                >
-                  <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
-                  Continue with Google
-                </button>
-              </>
-            )}
-
-            <div className="mt-8 flex flex-col gap-2">
-              {authMode === 'login' ? (
-                <>
-                  <button onClick={() => setAuthMode('signup')} className="text-sm text-brand-accent hover:underline focus:outline-none focus:ring-2 focus:ring-brand-accent rounded">
-                    Don't have an account? Sign up
-                  </button>
-                  <button onClick={() => setAuthMode('forgot')} className="text-sm text-slate-500 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-accent rounded">
-                    Forgot password?
-                  </button>
-                </>
-              ) : (
-                <button onClick={() => setAuthMode('login')} className="text-sm text-brand-accent hover:underline focus:outline-none focus:ring-2 focus:ring-brand-accent rounded">
-                  Back to login
-                </button>
-              )}
-            </div>
-            
-            <p className="mt-8 text-[10px] text-slate-600 uppercase tracking-widest font-bold">
-              MrLeeTeaches Coaching Portal
-            </p>
-            <a 
-              href="https://mrleeteaches.com/privacypolicy/" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="mt-4 text-[10px] text-slate-500 hover:text-brand-accent transition-colors focus:outline-none focus:ring-2 focus:ring-brand-accent rounded"
-            >
-              Privacy Policy
-            </a>
-          </div>
-        </motion.div>
+        <AuthSection 
+          authMode={authMode}
+          setAuthMode={setAuthMode}
+          email={email}
+          setEmail={setEmail}
+          password={password}
+          setPassword={setPassword}
+          displayName={displayName}
+          setDisplayName={setDisplayName}
+          authError={authError}
+          authMessage={authMessage}
+          handleEmailAuth={handleEmailAuth}
+          handleGoogleLogin={handleGoogleLogin}
+        />
       </div>
     );
   }
@@ -3314,7 +3211,7 @@ export default function App() {
         />
       );
       case 'library': return <LibraryView clients={clients} user={user} />;
-      case 'tools': return <ToolsLibraryView setActiveTab={setActiveTab} onOpenABC={() => setShowABCReframingModal(true)} onOpenTool={(name, type, component) => setOpenTool({ name, type, component })} />;
+      case 'tools': return <ToolsLibraryView user={user} setActiveTab={setActiveTab} onOpenABC={() => user ? setShowABCReframingModal(true) : setShowAuthModal(true)} onOpenBrainDump={() => user ? setShowBrainDumpModal(true) : setShowAuthModal(true)} onOpenTool={(name, type, component) => setOpenTool({ name, type, component })} onOpenAuth={() => setShowAuthModal(true)} />;
       case 'documents': return <DocumentsView documents={documents} role={profile?.role} user={user} />;
       case 'reflection': return (
         clientReflectionTemplate && selectedReflectionAppointment ? (
@@ -3527,21 +3424,31 @@ export default function App() {
               {profile?.photoURL ? (
                 <img src={profile.photoURL} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
-                user.displayName?.[0] || user.email?.[0].toUpperCase()
+                user?.displayName?.[0] || user?.email?.[0].toUpperCase() || '?'
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-white truncate">{user.displayName || 'User'}</p>
-              <p className="text-xs text-slate-500 truncate capitalize">{profile?.role}</p>
+              <p className="text-sm font-semibold text-white truncate">{user?.displayName || (user ? 'User' : 'Guest')}</p>
+              <p className="text-xs text-slate-500 truncate capitalize">{profile?.role || (user ? '' : 'Public Access')}</p>
             </div>
           </div>
-          <button 
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-rose-400 hover:bg-rose-400/5 rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-rose-400"
-          >
-            <LogOut className="w-5 h-5" />
-            <span className="font-medium">Sign Out</span>
-          </button>
+          {user ? (
+            <button 
+              onClick={handleLogout}
+              className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-rose-400 hover:bg-rose-400/5 rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-rose-400"
+            >
+              <LogOut className="w-5 h-5" />
+              <span className="font-medium">Sign Out</span>
+            </button>
+          ) : (
+            <button 
+              onClick={() => setShowAuthModal(true)}
+              className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-brand-accent hover:bg-brand-accent/5 rounded-xl transition-all duration-200"
+            >
+              <UserIcon className="w-5 h-5" />
+              <span className="font-medium">Sign In</span>
+            </button>
+          )}
         </div>
       </aside>
 
@@ -3756,21 +3663,31 @@ export default function App() {
                     {profile?.photoURL ? (
                       <img src={profile.photoURL} alt="Avatar" className="w-full h-full object-cover" />
                     ) : (
-                      user.displayName?.[0] || user.email?.[0].toUpperCase()
+                      user?.displayName?.[0] || user?.email?.[0].toUpperCase() || '?'
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-white truncate">{user.displayName || 'User'}</p>
-                    <p className="text-xs text-slate-500 truncate capitalize">{profile?.role}</p>
+                    <p className="text-sm font-semibold text-white truncate">{user?.displayName || (user ? 'User' : 'Guest')}</p>
+                    <p className="text-xs text-slate-500 truncate capitalize">{profile?.role || (user ? '' : 'Public Access')}</p>
                   </div>
                 </div>
-                <button 
-                  onClick={handleLogout}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-rose-400 hover:bg-rose-400/5 rounded-xl transition-all"
-                >
-                  <LogOut className="w-5 h-5" />
-                  <span className="font-medium">Sign Out</span>
-                </button>
+                {user ? (
+                  <button 
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-rose-400 hover:bg-rose-400/5 rounded-xl transition-all"
+                  >
+                    <LogOut className="w-5 h-5" />
+                    <span className="font-medium">Sign Out</span>
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => { setShowAuthModal(true); setSidebarOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-brand-accent hover:bg-brand-accent/5 rounded-xl transition-all"
+                  >
+                    <UserIcon className="w-5 h-5" />
+                    <span className="font-medium">Sign In</span>
+                  </button>
+                )}
               </div>
             </motion.aside>
           </>
@@ -4084,7 +4001,227 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Brain Dump Modal */}
+      <AnimatePresence>
+        {showBrainDumpModal && user && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowBrainDumpModal(false)}
+              className="absolute inset-0 bg-black/90 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-2xl bg-[#0f172a] border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl transition-all"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-brand-accent/10 flex items-center justify-center">
+                    <BrainCircuit className="w-6 h-6 text-brand-accent" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-white tracking-tight">Frictionless Brain Dump</h2>
+                </div>
+                <button 
+                  onClick={() => setShowBrainDumpModal(false)}
+                  className="p-2 text-slate-400 hover:text-white transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <BrainDump user={user} />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Auth Modal for Tools Site */}
+      <AnimatePresence>
+        {showAuthModal && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowAuthModal(false)}
+              className="absolute inset-0 bg-black/90 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md"
+            >
+              <button 
+                onClick={() => setShowAuthModal(false)}
+                className="absolute -top-12 right-0 p-2 text-slate-400 hover:text-white transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-6 h-6" />
+              </button>
+              <AuthSection 
+                authMode={authMode}
+                setAuthMode={setAuthMode}
+                email={email}
+                setEmail={setEmail}
+                password={password}
+                setPassword={setPassword}
+                displayName={displayName}
+                setDisplayName={setDisplayName}
+                authError={authError}
+                authMessage={authMessage}
+                handleEmailAuth={async (e: React.FormEvent) => {
+                  try {
+                    await handleEmailAuth(e);
+                  } catch(err) {}
+                }}
+                handleGoogleLogin={async () => {
+                  try {
+                    await handleGoogleLogin();
+                  } catch(err) {}
+                }}
+              />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+// --- Auth Section Component ---
+function AuthSection({ 
+  authMode, setAuthMode, email, setEmail, password, setPassword, 
+  displayName, setDisplayName, authError, authMessage, handleEmailAuth, handleGoogleLogin 
+}: any) {
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="max-w-md w-full bg-brand-surface border border-slate-800/50 rounded-3xl p-8 shadow-2xl"
+    >
+      <div className="flex flex-col items-center text-center">
+        <div className="w-16 h-16 mb-6">
+          <img 
+            src="/logo.png" 
+            alt="MrLeeTeaches Logo" 
+            className="w-full h-full object-contain rounded-2xl"
+            onError={(e) => {
+              e.currentTarget.src = 'https://mrleeteaches.com/wp-content/uploads/2026/03/logo.png';
+            }}
+          />
+        </div>
+        <h1 className="text-3xl font-bold text-white mb-1 tracking-tight">MrLeeTeaches</h1>
+        <p className="text-brand-accent font-medium text-sm mb-4">Neurodiversity Coaching</p>
+        <p className="text-slate-400 mb-8">
+          {authMode === 'login' && 'Welcome back! Please sign in to your account.'}
+          {authMode === 'signup' && 'Join the coaching portal to get started.'}
+          {authMode === 'forgot' && 'Enter your email to reset your password.'}
+        </p>
+        
+        {authError && (
+          <div className="w-full bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm p-3 rounded-xl mb-6">
+            {authError}
+          </div>
+        )}
+
+        {authMessage && (
+          <div className="w-full bg-brand-accent/10 border border-brand-accent/20 text-brand-accent text-sm p-3 rounded-xl mb-6">
+            {authMessage}
+          </div>
+        )}
+
+        <form onSubmit={handleEmailAuth} className="w-full space-y-4 mb-6">
+          {authMode === 'signup' && (
+            <input
+              type="text"
+              placeholder="Full Name"
+              required
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
+            />
+          )}
+          <input
+            type="email"
+            placeholder="Email Address"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
+          />
+          {authMode !== 'forgot' && (
+            <input
+              type="password"
+              placeholder="Password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full bg-brand-focus border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
+            />
+          )}
+          <button
+            type="submit"
+            className="w-full bg-brand-accent text-white font-semibold py-3 rounded-xl hover:bg-brand-secondary transition-all shadow-lg shadow-brand-accent/20 focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 focus:ring-offset-brand-surface"
+          >
+            {authMode === 'login' && 'Sign In'}
+            {authMode === 'signup' && 'Create Account'}
+            {authMode === 'forgot' && 'Send Reset Link'}
+          </button>
+        </form>
+
+        {authMode === 'login' && (
+          <>
+            <div className="w-full flex items-center gap-4 mb-6">
+              <div className="flex-1 h-px bg-slate-800" />
+              <span className="text-xs text-slate-500 uppercase font-bold">Or</span>
+              <div className="flex-1 h-px bg-slate-800" />
+            </div>
+
+            <button
+              onClick={handleGoogleLogin}
+              className="w-full flex items-center justify-center gap-3 bg-white text-slate-900 font-semibold py-3 rounded-xl hover:bg-slate-100 transition-all duration-200 shadow-lg shadow-white/5 focus:outline-none focus:ring-2 focus:ring-brand-accent"
+            >
+              <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
+              Continue with Google
+            </button>
+          </>
+        )}
+
+        <div className="mt-8 flex flex-col gap-2">
+          {authMode === 'login' ? (
+            <>
+              <button onClick={() => setAuthMode('signup')} className="text-sm text-brand-accent hover:underline focus:outline-none focus:ring-2 focus:ring-brand-accent rounded">
+                Don't have an account? Sign up
+              </button>
+              <button onClick={() => setAuthMode('forgot')} className="text-sm text-slate-500 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-accent rounded">
+                Forgot password?
+              </button>
+            </>
+          ) : (
+            <button onClick={() => setAuthMode('login')} className="text-sm text-brand-accent hover:underline focus:outline-none focus:ring-2 focus:ring-brand-accent rounded">
+              Back to login
+            </button>
+          )}
+        </div>
+        
+        <p className="mt-8 text-[10px] text-slate-600 uppercase tracking-widest font-bold">
+          MrLeeTeaches Coaching Portal
+        </p>
+        <a 
+          href="https://mrleeteaches.com/privacypolicy/" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="mt-4 text-[10px] text-slate-500 hover:text-brand-accent transition-colors focus:outline-none focus:ring-2 focus:ring-brand-accent rounded"
+        >
+          Privacy Policy
+        </a>
+      </div>
+    </motion.div>
   );
 }
 
@@ -7640,9 +7777,9 @@ const TOOLS = [
   },
   {
     name: "Frictionless Brain Dump",
-    icon: Brain,
+    icon: BrainCircuit,
     description: `The Frictionless Brain Dump is designed to help you instantly externalize your working memory without the executive function tax of organizing your thoughts on the spot. Whether you have a sudden idea, a looming task, or simply need to process an emotion, just type or dictate your raw thoughts into the single text box and hit save. Every evening at 5:00 PM, the system automatically reviews your raw notes, sorts them into Tasks, Ideas, and Emotional Check-ins, and delivers a clean, organized digest straight to your inbox.`,
-    link: "https://script.google.com/macros/s/AKfycby0zEDm3-rAxn62BpX9z2k3gIZMqr1VweCDjN-TO6z7aPvt1wGof0dX7ReaVwiELkY/exec"
+    type: 'internal'
   },
   {
     name: "Dear Man Batting Cage",
@@ -7654,12 +7791,11 @@ const TOOLS = [
     name: "ABC Cognitive Reframing",
     icon: Activity,
     description: "The ABC's of Thoughts, Feelings, & Actions tool is a cognitive reframing system designed to help you externalize and examine intense internal experiences. Simply log the 'Activating Event' to ground yourself in the facts of what happened, then document the 'Beliefs' or thoughts the situation triggered. After noting the emotional and behavioral 'Consequences', you can work with the system to develop a 'Reframe'—a more balanced or helpful perspective. This tool helps you build awareness of your cognitive patterns and empowers you to shift your outcome over time.",
-    type: 'internal',
-    action: () => window.dispatchEvent(new CustomEvent('open-abc-reframing'))
+    type: 'internal'
   }
 ];
 
-function ToolsLibraryView({ setActiveTab, onOpenABC, onOpenTool }: { setActiveTab?: (tab: string) => void; onOpenABC?: () => void; onOpenTool?: (name: string, type: 'basic' | 'advanced', component: React.ReactNode) => void }) {
+function ToolsLibraryView({ user, setActiveTab, onOpenABC, onOpenBrainDump, onOpenTool, onOpenAuth }: { user: User | null; setActiveTab?: (tab: string) => void; onOpenABC?: () => void; onOpenBrainDump?: () => void; onOpenTool?: (name: string, type: 'basic' | 'advanced', component: React.ReactNode) => void; onOpenAuth?: () => void }) {
   const [expandedIndices, setExpandedIndices] = useState<number[]>([]);
 
   const toggleExpand = (index: number) => {
@@ -7728,11 +7864,15 @@ function ToolsLibraryView({ setActiveTab, onOpenABC, onOpenTool }: { setActiveTa
             {tool.type === 'internal' ? (
               <button 
                 onClick={() => {
-                  if (tool.name === 'ABC Cognitive Reframing') {
-                    if (onOpenTool) {
-                      onOpenTool('ABC Cognitive Reframing', 'basic', <ABCWorksheet isPrivate={true} onSave={() => {}} />);
-                    } else if (onOpenABC) {
-                      onOpenABC();
+                  if (tool.name === 'Frictionless Brain Dump' || tool.name === 'ABC Cognitive Reframing') {
+                    if (!user) {
+                      onOpenAuth?.();
+                    } else {
+                      if (tool.name === 'Frictionless Brain Dump') onOpenBrainDump?.();
+                      if (tool.name === 'ABC Cognitive Reframing') {
+                        if (onOpenABC) onOpenABC();
+                        else if (onOpenTool) onOpenTool('ABC Cognitive Reframing', 'basic', <ABCWorksheet isPrivate={true} onSave={() => {}} />);
+                      }
                     }
                   } else if (tool.tab) {
                     setActiveTab?.(tool.tab);
@@ -7742,7 +7882,7 @@ function ToolsLibraryView({ setActiveTab, onOpenABC, onOpenTool }: { setActiveTa
                 }}
                 className="flex items-center justify-center gap-2 w-full py-3 bg-brand-accent text-white rounded-xl font-bold hover:bg-brand-secondary transition-all group-hover:shadow-lg group-hover:shadow-brand-accent/10 border border-brand-accent/20 focus:outline-none focus:ring-2 focus:ring-brand-accent"
               >
-                Open Tool <ArrowRight className="w-4 h-4" />
+                {(tool.name === 'Frictionless Brain Dump' || tool.name === 'ABC Cognitive Reframing') && !user ? 'Please Sign in to Use' : 'Open Tool'} <ArrowRight className="w-4 h-4" />
               </button>
             ) : (
               <a 

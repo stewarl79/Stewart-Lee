@@ -1148,7 +1148,11 @@ TO FIX THIS:
     transporter.verify((error, success) => {
       if (error) {
         console.error("SMTP Connection Error:", error);
-        console.log("Tip: If using port 587, set SMTP_SECURE to 'false'. If using port 465, set it to 'true'.");
+        if (error.message.includes("535")) {
+          console.log("CRITICAL: Invalid SMTP login (Error 535). Please verify your SMTP_PASS. If using Gmail, you MUST use an 'App Password'.");
+        } else {
+          console.log("Tip: If using port 587, set SMTP_SECURE to 'false'. If using port 465, set it to 'true'.");
+        }
       } else {
         console.log("SMTP Server is ready to take our messages");
       }
