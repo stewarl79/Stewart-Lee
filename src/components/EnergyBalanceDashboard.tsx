@@ -366,205 +366,204 @@ export default function EnergyBalanceDashboard({ user }: EnergyBalanceDashboardP
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-20">
-      <header className="flex items-center justify-between bg-brand-surface p-6 rounded-3xl shadow-xl border border-slate-800/50">
+    <div className="max-w-2xl mx-auto space-y-6 pb-20">
+      <header className="bg-brand-surface p-4 rounded-xl shadow-xl border border-slate-800/50 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Energy Balance Dashboard</h1>
-          <p className="text-sm text-slate-400">Visualize capacity and prevent burnout</p>
+          <h1 className="text-xl font-bold text-white tracking-tight">Energy Balance Dashboard</h1>
+          <p className="text-xs text-slate-500">Mr. Lee Teaches Coaching</p>
         </div>
-        <div className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center overflow-hidden border border-slate-700">
+        <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center overflow-hidden border border-slate-700">
           <img 
             src="https://mrleeteaches.com/wp-content/uploads/2025/08/Designer-2.webp" 
-            alt="Logo" 
+            alt="Mr. Lee Teaches Coaching Logo" 
             className="w-full h-full object-cover" 
           />
         </div>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Morning Readiness */}
-        <motion.section 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-brand-surface p-6 rounded-3xl shadow-xl border border-slate-800/50"
-        >
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 bg-brand-accent/10 rounded-xl flex items-center justify-center text-brand-accent border border-brand-accent/20">
-              <Zap className="w-5 h-5" />
-            </div>
-            <h2 className="text-lg font-bold text-white tracking-tight">Morning Readiness</h2>
-          </div>
+      {/* Morning Readiness */}
+      <motion.section 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-brand-surface p-6 rounded-2xl shadow-xl border border-slate-800/50"
+      >
+        <div className="mb-6">
+          <h2 className="text-lg font-bold text-white tracking-tight mb-1">Morning Readiness</h2>
+          <p className="text-slate-400 text-sm">How much capacity do you have today?</p>
+        </div>
 
-          {!todayReadiness ? (
-            <div className="space-y-6 text-center">
-              <div>
-                <p className="text-slate-400 text-sm mb-4 leading-relaxed">How much capacity do you have today?</p>
-                <div className="flex items-center gap-4">
-                  <span className="text-xs font-bold text-slate-500 uppercase">Empty</span>
-                  <input 
-                    type="range" 
-                    min="1" 
-                    max="10" 
-                    value={readiness} 
-                    onChange={e => setReadiness(parseInt(e.target.value))}
-                    className="flex-1 accent-brand-accent h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer"
-                  />
-                  <span className="text-xs font-bold text-slate-500 uppercase">Full</span>
+        {!todayReadiness ? (
+          <div className="space-y-6 text-center">
+            <div>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="text-left select-none">
+                  <span className="block text-slate-400 text-xs font-medium">Empty</span>
+                  <span className="block text-slate-500 text-xs font-bold">(1)</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="1" 
+                  max="10" 
+                  value={readiness} 
+                  onChange={e => setReadiness(parseInt(e.target.value))}
+                  aria-label="Daily capacity readiness from 1 (empty) to 10 (full)"
+                  className="flex-1 accent-[#10b981] h-1.5 bg-[#1e293b] rounded-lg appearance-none cursor-pointer focus:ring-2 focus:ring-[#10b981] outline-none transition-all"
+                />
+                <div className="text-right select-none">
+                  <span className="block text-slate-400 text-xs font-medium">Full</span>
+                  <span className="block text-slate-500 text-xs font-bold">(10)</span>
                 </div>
               </div>
-              <div className="text-5xl font-black text-brand-accent tabular-nums">{readiness}</div>
-              <button 
-                onClick={handleSaveReadiness}
-                disabled={isSaving}
-                className="w-full py-4 bg-brand-accent hover:bg-brand-secondary text-white font-bold rounded-2xl transition-all shadow-lg shadow-brand-accent/20 disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {isSaving ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-                Log Readiness
-              </button>
             </div>
-          ) : (
-            <div className="text-center py-4 space-y-4">
-              <p className="text-slate-400 text-sm font-medium">Your Capacity Today</p>
-              <div className="inline-flex items-center justify-center w-24 h-24 rounded-3xl bg-brand-accent/10 border-4 border-brand-accent shadow-inner relative overflow-hidden group">
-                <div className="absolute inset-0 bg-brand-accent/5 transition-opacity" />
-                <span className="text-4xl font-black text-white relative z-10">{todayReadiness.score}</span>
-              </div>
-              <div className="flex items-center justify-center gap-2 text-brand-accent font-bold text-sm bg-brand-accent/5 py-2 px-4 rounded-full w-fit mx-auto">
-                <CheckCircle2 className="w-4 h-4" />
-                Logged for today
-              </div>
-            </div>
-          )}
-        </motion.section>
-
-        {/* Task Log */}
-        <motion.section 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="bg-brand-surface p-6 rounded-3xl shadow-xl border border-slate-800/50"
-        >
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 bg-rose-500/10 rounded-xl flex items-center justify-center text-rose-500 border border-rose-500/20">
-              <Battery className="w-5 h-5" />
-            </div>
-            <h2 className="text-lg font-bold text-white tracking-tight">Log a Task</h2>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Select Activity</label>
-              <select 
-                value={selectedTaskId}
-                onChange={e => {
-                  setSelectedTaskId(e.target.value);
-                  setIsCreatingTask(e.target.value === 'new');
-                }}
-                className="w-full bg-brand-focus border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent appearance-none"
-              >
-                <option value="">Select or create a task...</option>
-                <option value="new" className="text-brand-accent font-bold">+ Create New Activity</option>
-                {getSortedTasks.map(task => (
-                  <option key={task.id} value={task.id}>
-                    {task.name} {task.impactType === 'Deposit' ? '(Deposit)' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <AnimatePresence mode="wait">
-              {todayReadiness && todayReadiness.score <= 4 && selectedTask?.impactType === 'Drain' && logs.filter(l => l.taskId === selectedTaskId).length > 0 && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl flex gap-3"
-                >
-                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
-                  <div>
-                    <p className="text-xs font-bold text-amber-500 uppercase tracking-tight">High Energy Demand</p>
-                    <p className="text-xs text-slate-300 mt-1">Your readiness is low. This activity is typically a drain for you.</p>
-                  </div>
-                </motion.div>
-              )}
-
-              {isCreatingTask && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="space-y-4 overflow-hidden"
-                >
-                  <div className="bg-slate-800/30 p-4 rounded-2xl border border-slate-800/50 space-y-4">
-                    <input 
-                      type="text"
-                      value={newTaskName}
-                      onChange={e => setNewTaskName(e.target.value)}
-                      placeholder="Task Name"
-                      className="w-full bg-brand-focus border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
-                    />
-                    <div className="grid grid-cols-2 gap-3">
-                      <select 
-                        value={newTaskCategory}
-                        onChange={e => setNewTaskCategory(e.target.value as any)}
-                        className="bg-brand-focus border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
-                      >
-                        <option value="Sensory">Sensory</option>
-                        <option value="Social">Social</option>
-                        <option value="Cognitive">Cognitive</option>
-                        <option value="Physical">Physical</option>
-                        <option value="Uncategorized">Uncategorized</option>
-                      </select>
-                      <select 
-                        value={newTaskImpact}
-                        onChange={e => setNewTaskImpact(e.target.value as any)}
-                        className="bg-brand-focus border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-brand-accent"
-                      >
-                        <option value="Drain">Drain</option>
-                        <option value="Deposit">Deposit</option>
-                      </select>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <div>
-              <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">
-                {currentImpactType === 'Deposit' ? 'Restoration Level' : 'Drain intensity'}
-              </label>
-              <div className="grid grid-cols-5 gap-2">
-                {[1, 2, 3, 4, 5].map(rating => (
-                  <button
-                    key={rating}
-                    onClick={() => setSelectedRating(rating)}
-                    className={`h-12 rounded-xl font-bold transition-all border ${
-                      selectedRating === rating 
-                        ? 'bg-brand-accent border-brand-accent text-white shadow-lg shadow-brand-accent/20 scale-105' 
-                        : 'bg-brand-focus border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    {rating}
-                  </button>
-                ))}
-              </div>
-              <div className="flex justify-between mt-2 px-1">
-                <span className="text-[10px] font-bold text-slate-500 uppercase">Slight</span>
-                <span className="text-[10px] font-bold text-slate-500 uppercase">Intense</span>
-              </div>
-            </div>
-
+            <div className="text-5xl font-bold text-[#10b981] tabular-nums">{readiness}</div>
             <button 
-              onClick={handleSaveLog}
-              disabled={isSaving || !selectedRating || (selectedTaskId === 'new' && !newTaskName) || (selectedTaskId === '')}
-              className="w-full py-4 bg-brand-secondary hover:bg-brand-secondary/80 text-white font-bold rounded-2xl transition-all shadow-lg shadow-brand-accent/10 disabled:opacity-50 flex items-center justify-center gap-2"
+              onClick={handleSaveReadiness}
+              disabled={isSaving}
+              className="w-full py-3 bg-[#2d3748] hover:bg-[#3d4a5d] text-white font-bold rounded-xl transition-all shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {isSaving ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-              Save Task Entry
+              Log Readiness
             </button>
           </div>
-        </motion.section>
-      </div>
+        ) : (
+          <div className="text-center py-4 space-y-4">
+            <p className="text-slate-400 text-sm font-medium">Your Capacity Today</p>
+            <div className="text-6xl font-bold text-[#10b981] tabular-nums">{todayReadiness.score}</div>
+            <div className="flex items-center justify-center gap-2 text-[#10b981] font-bold text-xs bg-[#10b981]/5 py-2 px-4 rounded-full w-fit mx-auto">
+              <CheckCircle2 className="w-4 h-4" />
+              Logged for today
+            </div>
+          </div>
+        )}
+      </motion.section>
+
+      {/* Log a Task */}
+      <motion.section 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="bg-brand-surface p-6 rounded-2xl shadow-xl border border-slate-800/50"
+      >
+        <div className="mb-6">
+          <h2 className="text-lg font-bold text-white tracking-tight mb-1">Log a Task</h2>
+          <p className="text-slate-400 text-sm">What did you do?</p>
+        </div>
+
+        <div className="space-y-6">
+          <div>
+            <select 
+              value={selectedTaskId}
+              onChange={e => {
+                setSelectedTaskId(e.target.value);
+                setIsCreatingTask(e.target.value === 'new');
+              }}
+              aria-label="Select or Create an activity"
+              className="w-full bg-[#1e293b] border border-[#2d3748] rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-[#10b981] outline-none transition-all appearance-none text-sm cursor-pointer"
+            >
+              <option value="">Select or Create a task...</option>
+              <option value="new" className="text-brand-accent font-bold">+ Create New Activity</option>
+              {getSortedTasks.map(task => (
+                <option key={task.id} value={task.id}>
+                  {task.name} {task.impactType === 'Deposit' ? '(Deposit)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <AnimatePresence mode="wait">
+            {todayReadiness && todayReadiness.score <= 4 && selectedTask?.impactType === 'Drain' && logs.filter(l => l.taskId === selectedTaskId).length > 0 && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl flex gap-3"
+              >
+                <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+                <div>
+                  <p className="text-xs font-bold text-amber-500 uppercase tracking-tight">High Energy Demand</p>
+                  <p className="text-xs text-slate-300 mt-1">Your readiness is low. This activity is typically a drain for you.</p>
+                </div>
+              </motion.div>
+            )}
+
+            {isCreatingTask && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="space-y-4 overflow-hidden"
+              >
+                <div className="bg-slate-800/30 p-4 rounded-2xl border border-slate-800/50 space-y-4">
+                  <input 
+                    type="text"
+                    value={newTaskName}
+                    onChange={e => setNewTaskName(e.target.value)}
+                    placeholder="Task Name"
+                    aria-label="New task name"
+                    className="w-full bg-[#1e293b] border border-[#2d3748] rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-[#10b981] outline-none transition-all"
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <select 
+                      value={newTaskCategory}
+                      onChange={e => setNewTaskCategory(e.target.value as any)}
+                      aria-label="New task category"
+                      className="bg-[#1e293b] border border-[#2d3748] rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-[#10b981] outline-none transition-all cursor-pointer"
+                    >
+                      <option value="Sensory">Sensory</option>
+                      <option value="Social">Social</option>
+                      <option value="Cognitive">Cognitive</option>
+                      <option value="Physical">Physical</option>
+                      <option value="Uncategorized">Uncategorized</option>
+                    </select>
+                    <select 
+                      value={newTaskImpact}
+                      onChange={e => setNewTaskImpact(e.target.value as any)}
+                      aria-label="New task impact type"
+                      className="bg-[#1e293b] border border-[#2d3748] rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-[#10b981] outline-none transition-all cursor-pointer"
+                    >
+                      <option value="Drain">Drain</option>
+                      <option value="Deposit">Deposit</option>
+                    </select>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div>
+            <p className="text-slate-400 text-xs font-medium mb-3">How draining was it?</p>
+            <div className="grid grid-cols-5 gap-2">
+              {[1, 2, 3, 4, 5].map(rating => (
+                <button
+                  key={rating}
+                  onClick={() => setSelectedRating(rating)}
+                  aria-label={`Rating ${rating} out of 5`}
+                  aria-pressed={selectedRating === rating}
+                  className={`h-11 rounded-lg font-bold transition-all outline-none focus:ring-2 focus:ring-[#10b981] ${
+                    selectedRating === rating 
+                      ? 'bg-[#3b475a] text-white shadow-lg' 
+                      : 'bg-[#2d3748] text-slate-400 hover:bg-[#3b475a]'
+                  }`}
+                >
+                  {rating}
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-between mt-2 px-1">
+              <span className="text-[10px] font-medium text-slate-500">Easy</span>
+              <span className="text-[10px] font-medium text-slate-500">Draining</span>
+            </div>
+          </div>
+
+          <button 
+            onClick={handleSaveLog}
+            disabled={isSaving || !selectedRating || (selectedTaskId === 'new' && !newTaskName) || (selectedTaskId === '')}
+            className="w-full py-4 bg-[#10b981] hover:bg-[#0da371] text-white font-bold rounded-xl transition-all shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {isSaving ? <RefreshCw className="w-5 h-5 animate-spin" /> : null}
+            Save Task Entry
+          </button>
+        </div>
+      </motion.section>
 
       {/* Analytics Section */}
       <motion.section 
@@ -574,25 +573,25 @@ export default function EnergyBalanceDashboard({ user }: EnergyBalanceDashboardP
         className="bg-brand-surface p-6 rounded-3xl shadow-xl border border-slate-800/50"
       >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-brand-accent/10 rounded-xl flex items-center justify-center text-brand-accent border border-brand-accent/20">
-              <TrendingUp className="w-5 h-5" />
-            </div>
+          <div className="mb-2 md:mb-0">
             <h2 className="text-lg font-bold text-white tracking-tight">Energy Profile</h2>
           </div>
 
-          <div className="flex bg-slate-800/50 p-1 rounded-xl border border-slate-700/50">
+          <div className="flex bg-[#1e293b] p-1 rounded-lg border border-slate-700/50" role="tablist">
             {[
-              { id: 'category', label: 'By Category' },
-              { id: 'task', label: 'Top Tasks' },
-              { id: 'trend', label: 'Burnout Trend' }
+              { id: 'category', label: 'Categories' },
+              { id: 'task', label: 'Tasks' },
+              { id: 'trend', label: 'Burnout Trends' }
             ].map(tab => (
               <button
                 key={tab.id}
+                role="tab"
+                aria-selected={activeChartView === tab.id}
+                aria-controls={`chart-panel-${tab.id}`}
                 onClick={() => setActiveChartView(tab.id as any)}
-                className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                className={`px-4 py-1.5 text-xs font-bold rounded flex-1 transition-all outline-none focus:ring-2 focus:ring-[#10b981] ${
                   activeChartView === tab.id 
-                    ? 'bg-slate-700 text-white shadow-lg' 
+                    ? 'bg-[#3b475a] text-white shadow-lg' 
                     : 'text-slate-500 hover:text-slate-300'
                 }`}
               >
@@ -614,9 +613,9 @@ export default function EnergyBalanceDashboard({ user }: EnergyBalanceDashboardP
                   contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
                   itemStyle={{ fontSize: '12px' }}
                 />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-                <Bar yAxisId="logs" dataKey="drain" name="Drain Total" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                <Bar yAxisId="logs" dataKey="deposit" name="Deposit Total" fill="#10b981" radius={[4, 4, 0, 0]} />
+                <Legend iconType="rect" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
+                <Bar yAxisId="logs" dataKey="drain" name="Avg Drain (1-5)" fill="#f6ad55" radius={[4, 4, 0, 0]} />
+                <Bar yAxisId="logs" dataKey="deposit" name="Avg Deposit (1-5)" fill="#10b981" radius={[4, 4, 0, 0]} />
                 <Line yAxisId="readiness" type="monotone" dataKey="readiness" name="Readiness" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6', r: 4 }} />
               </ComposedChart>
             ) : (
@@ -628,8 +627,9 @@ export default function EnergyBalanceDashboard({ user }: EnergyBalanceDashboardP
                   contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
                   itemStyle={{ fontSize: '12px' }}
                 />
-                <Bar dataKey="drain" name="Avg Drain" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="deposit" name="Avg Deposit" fill="#10b981" radius={[4, 4, 0, 0]} />
+                <Legend iconType="rect" wrapperStyle={{ fontSize: '10px', paddingTop: '20px' }} />
+                <Bar dataKey="drain" name="Avg Drain (1-5)" fill="#f6ad55" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="deposit" name="Avg Deposit (1-5)" fill="#10b981" radius={[2, 2, 0, 0]} />
               </BarChart>
             )}
           </ResponsiveContainer>

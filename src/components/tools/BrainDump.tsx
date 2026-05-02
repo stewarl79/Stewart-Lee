@@ -174,6 +174,7 @@ export const BrainDump: React.FC<BrainDumpProps> = ({ user }) => {
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="What's on your mind? Just dump it here..."
+          aria-label="Brain dump text area"
           className="w-full h-64 bg-brand-surface border border-slate-700/50 rounded-2xl p-6 text-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-accent/50 focus:border-brand-accent transition-all resize-none shadow-inner group-hover:border-slate-600/50"
         />
         <div className="absolute bottom-4 right-4 flex items-center gap-2">

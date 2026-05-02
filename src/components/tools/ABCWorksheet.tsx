@@ -109,7 +109,8 @@ export const ABCWorksheet: React.FC<ABCWorksheetProps> = ({
               value={formData.situation}
               onChange={e => setFormData({...formData, situation: e.target.value})}
               placeholder="Describe the facts of the event..."
-              className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4 text-white text-sm focus:ring-2 focus:ring-brand-accent transition-all min-h-[150px] resize-none"
+              aria-label="Describe the activating event facts"
+              className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4 text-white text-sm focus:ring-2 focus:ring-brand-accent transition-all min-h-[150px] resize-none outline-none"
             />
           </div>
 
@@ -124,7 +125,8 @@ export const ABCWorksheet: React.FC<ABCWorksheetProps> = ({
               value={formData.thoughts}
               onChange={e => setFormData({...formData, thoughts: e.target.value})}
               placeholder="What did you tell yourself about the situation?"
-              className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4 text-white text-sm focus:ring-2 focus:ring-amber-500 transition-all min-h-[150px] resize-none"
+              aria-label="Your belief or stuck point"
+              className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4 text-white text-sm focus:ring-2 focus:ring-amber-500 transition-all min-h-[150px] resize-none outline-none"
             />
           </div>
 
@@ -139,7 +141,8 @@ export const ABCWorksheet: React.FC<ABCWorksheetProps> = ({
               value={formData.consequences}
               onChange={e => setFormData({...formData, consequences: e.target.value})}
               placeholder="How did you feel or react?"
-              className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4 text-white text-sm focus:ring-2 focus:ring-indigo-500 transition-all min-h-[150px] resize-none"
+              aria-label="Consequences of the belief"
+              className="w-full bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4 text-white text-sm focus:ring-2 focus:ring-indigo-500 transition-all min-h-[150px] resize-none outline-none"
             />
           </div>
         </div>

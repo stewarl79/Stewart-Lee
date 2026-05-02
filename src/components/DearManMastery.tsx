@@ -270,12 +270,15 @@ export default function DearManMastery({ user }: { user: any }) {
       </header>
 
       {/* Tabs */}
-      <div className="bg-slate-800 p-1 rounded-xl flex w-full border border-slate-700 shadow-inner mb-6">
+      <div className="bg-slate-800 p-1 rounded-xl flex w-full border border-slate-700 shadow-inner mb-6" role="tablist">
         {(['tracker', 'practice', 'analysis'] as View[]).map((tab) => (
           <button
             key={tab}
+            role="tab"
+            aria-selected={activeView === tab}
+            aria-controls={`panel-${tab}`}
             onClick={() => setActiveView(tab)}
-            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all duration-200 flex items-center justify-center gap-2 ${
+            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all duration-200 flex items-center justify-center gap-2 outline-none focus:ring-2 focus:ring-brand-secondary ${
               activeView === tab 
                 ? 'bg-brand-secondary text-white shadow-sm' 
                 : 'text-slate-400 hover:text-slate-200'
@@ -313,6 +316,7 @@ export default function DearManMastery({ user }: { user: any }) {
                     value={formData.describe}
                     onChange={handleInputChange}
                     placeholder="Stick to the facts..."
+                    aria-label="Describe the facts objectively"
                     className="w-full h-24 bg-slate-900 text-white rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-secondary/50 resize-none border border-slate-700 transition-all"
                     required
                   />
@@ -330,6 +334,7 @@ export default function DearManMastery({ user }: { user: any }) {
                     value={formData.express}
                     onChange={handleInputChange}
                     placeholder="I feel ___ when ___"
+                    aria-label="Express how you feel"
                     className="w-full h-20 bg-slate-900 text-white rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-secondary/50 resize-none border border-slate-700 transition-all"
                     required
                   />
@@ -347,6 +352,7 @@ export default function DearManMastery({ user }: { user: any }) {
                     value={formData.assert}
                     onChange={handleInputChange}
                     placeholder="I would like..."
+                    aria-label="Assert what you want or need"
                     className="w-full h-20 bg-slate-900 text-white rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-secondary/50 resize-none border border-slate-700 transition-all"
                     required
                   />
@@ -483,13 +489,15 @@ export default function DearManMastery({ user }: { user: any }) {
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSendChat()}
                   placeholder="Ask a scenario... (or 'END ROLEPLAY')" 
+                  aria-label="Practice chat input"
                   className="flex-grow bg-slate-900 text-white rounded-xl p-4 text-sm focus:outline-none focus:ring-2 focus:ring-brand-secondary/50 border border-slate-700 transition-all"
                   disabled={isTyping}
                 />
                 <button 
                   onClick={handleSendChat}
                   disabled={isTyping || !chatInput.trim()}
-                  className="bg-brand-secondary hover:bg-brand-secondary/80 text-white px-5 rounded-xl transition-all active:scale-95 flex items-center justify-center disabled:opacity-50"
+                  aria-label="Send message"
+                  className="bg-brand-secondary hover:bg-brand-secondary/80 text-white px-5 rounded-xl transition-all active:scale-95 flex items-center justify-center disabled:opacity-50 outline-none focus:ring-2 focus:ring-brand-secondary"
                 >
                   <Send className="w-5 h-5" />
                 </button>
